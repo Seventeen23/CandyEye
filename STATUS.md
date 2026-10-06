@@ -1,15 +1,15 @@
 # Status — Current Phase
 
-**Phase 0: Environment & data — COMPLETE (pending commit) → Phase 1: Model**  
-Last updated: 2026-10-07 (after `2e0a562`; Phase 0 closure edits uncommitted)
+**Phase 0: Environment & data — COMPLETE → Phase 1: Model (in progress)**  
+Last updated: 2026-10-07 (through `da54fd9`; Phase 1 started: `core/` layout)
 
 ---
 
 ## Where we are
 
 ```
-Phase 0 ██████████ complete (awaiting commit)
-Phase 1 ░░░░░░░░░░ next — spec ready in SPECS.md
+Phase 0 ██████████ complete
+Phase 1 █░░░░░░░░░ in progress — Conv ✓, blocks next (spec in SPECS.md)
 ```
 
 Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
@@ -64,7 +64,7 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
    output).
 
 3. ~~**Editable install exposes nothing.**~~ **RESOLVED (won't fix)** —
-   decision 2026-10-07: flat layout stays (`data/`, `model/`, … top-level,
+   decision 2026-10-07: flat layout stays (`data/`, `core/`, … top-level,
    no `__init__.py`), run from repo root with `PYTHONPATH=.`, `pyproject.toml`
    left as-is. Scripts are always launched from the repo root anyway.
 
@@ -87,11 +87,11 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 
 ## Next actions
 
-1. Commit Phase 0 closure (`inspect_data.py`, `data/voc.py` collate_fn,
-   STATUS.md, .gitignore egg-info/SPECS entries)
-2. **Phase 1 (model)** — spec ready in SPECS.md: blocks → YAML builder →
-   forward test, param assert 2,592,740
-3. User writes blocks, agent reviews per file
+1. **Phase 1 continued** — `core/modules/blocks.py` (Bottleneck → C3k →
+   C3k2 → SPPF → Attention/PSABlock → C2PSA), spec + paste-boxes in SPECS.md
+2. `core/modules/detect.py` (DFL + Detect) → `configs/yolo11.yaml` →
+   `core/yolo.py` builder → shape/param tests
+3. Review → commit each step → Phase 2 (weight loading)
 
 ---
 

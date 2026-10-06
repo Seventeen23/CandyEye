@@ -5,6 +5,13 @@ checks passing and a code review. See [STATUS.md](STATUS.md) for live progress.
 
 Status legend: `todo` · `in progress` · `done` · `blocked`
 
+**Design DNA — why the name:** *CandyEye* = fructose-simple sugar (small,
+sweet, quick energy) + one glance. Three pillars, one per reference model:
+**detection** (YOLO: single-stage, one forward pass) · **efficient &
+lightweight** (MobileNet: ~2.6M params, CPU-only, 128×128) · **parallel**
+(YOLACT++: FPN neck scales + the Detect head's box/class branches compute
+simultaneously over shared conv features — no mask branch, boxes only).
+
 ---
 
 ## Phase 0 — Environment & data
@@ -16,20 +23,21 @@ Status legend: `todo` · `in progress` · `done` · `blocked`
 - [x] `scripts/download_voc.py` (download / extract / verify / cleanup)
 - [x] `data/voc.py` — `VOCDataset` (XML parse, clamp, drop degenerate)
 - [x] Run download, verify `trainval=5011` / `test=4952`
-- [ ] `scripts/inspect_data.py` — draw GT boxes, eyeball correctness
-- [ ] DataLoader smoke test (`num_workers=2`)
-- [ ] Acceptance checklist in [STATUS.md](STATUS.md#acceptance-checklist)
+- [x] `scripts/inspect_data.py` — draw GT boxes, eyeball correctness
+- [x] DataLoader smoke test (`num_workers=2`)
+- [x] Acceptance checklist in [STATUS.md](STATUS.md#acceptance-checklist)
 
 ## Phase 1 — Model
 
 **Goal:** forward pass at 128×128 → 3 scale outputs, YOLO11-compatible layout.
 
-- [ ] `core/blocks.py` — Conv(CBS), Bottleneck, C3k2, SPPF, C2PSA
-- [ ] `core/backbone.py` — layers 0–10 (indexed ModuleList)
-- [ ] `core/neck.py` — PAN-FPN, layers 11–22
-- [ ] `core/head.py` — decoupled Detect head, DFL (reg_max=16)
-- [ ] `core/model.py` — assembly + forward graph
-- [ ] Shape tests: `1×3×128×128` → P3/P4/P5 correct channels, param count ~2.6M
+- [x] `core/functions/layer_utils.py` — autopad, make_divisible
+- [x] `core/modules/conv.py` — Conv (verified: params/keys match official layer 0)
+- [ ] `core/modules/blocks.py` — Bottleneck, C3k, C3k2, SPPF, Attention, PSABlock, C2PSA
+- [ ] `core/modules/detect.py` — DFL + Detect (parallel box/class branches)
+- [ ] `configs/yolo11.yaml` — architecture transcription, nc=20, scale `n`
+- [ ] `core/yolo.py` — YAML parser/builder + forward graph
+- [ ] Shape tests: `1×3×128×128` → P3/P4/P5 correct channels, param count 2,592,740
 
 ## Phase 2 — Pretrained demo (Experiment A)
 
