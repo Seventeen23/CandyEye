@@ -2,7 +2,7 @@ venv
 venv/
 .venv/
 __pycache__/
-data/
+# data/
 runs/
 weights/
 *.pt
