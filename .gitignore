@@ -2,7 +2,9 @@ venv
 venv/
 .venv/
 __pycache__/
-# data/
+data/downloads/
+data/VOCdevkit/
+*.egg-info/
 runs/
 weights/
 *.pt

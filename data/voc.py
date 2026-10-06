@@ -28,7 +28,7 @@ class VOCDataset(torch.utils.data.Dataset):
         self.split = split
         self.transform = transform
 
-        self.voc_dir = self.root / "VOCdevkit" / "VOC2007"
+        self.voc_dir = self.root / "VOC2007"
 
         image_sets_dir = self.voc_dir / "ImageSets" / "Main"
         split_file = image_sets_dir / f"{split}.txt"

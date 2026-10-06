@@ -1,7 +1,7 @@
 # Status — Current Phase
 
 **Phase 0: Environment & data — in progress**  
-Last updated: 2026-10-06 (commit `78524b2`, branch `master`, tree clean)
+Last updated: 2026-10-06 (after `84f7fed`; known issues 1/2/4 fixed — uncommitted)
 
 ---
 
@@ -52,26 +52,16 @@ Phases 1–8 not started — see [ROADMAP.md](ROADMAP.md).
 
 ## Known issues
 
-Ordered by what to fix first. Items 1–2 **before** downloading.
+1. ~~**`.gitignore` no longer ignores the dataset.**~~ **FIXED** — `# data/`
+   replaced with `data/downloads/` + `data/VOCdevkit/`; `data/voc.py` stays
+   tracked. Verified: dataset dirs ignored, `data/voc.py` not ignored.
 
-1. **`.gitignore` no longer ignores the dataset.**  
-   `data/` was commented out (line 5: `# data/`) so `data/voc.py` could be
-   tracked — but that also un-ignores `data/downloads/` (~870 MB tars) and
-   `data/VOCdevkit/` (~2 GB).  
-   **Fix:** replace `# data/` with:
-   ```
-   data/downloads/
-   data/VOCdevkit/
-   ```
+2. ~~**Dataset path mismatch (double `VOCdevkit`).**~~ **FIXED** —
+   `data/voc.py:31` now `self.root / "VOC2007"`. Verified: resolves to
+   `data/VOCdevkit/VOC2007/ImageSets/Main/trainval.txt` (matches download
+   output).
 
-2. **Dataset path mismatch (double `VOCdevkit`).**  
-   `configs/default.yaml` says `root: data/VOCdevkit`, but `data/voc.py:31`
-   appends another `VOCdevkit/` → resolves to
-   `data/VOCdevkit/VOCdevkit/VOC2007` (missing). Download script extracts to
-   `data/VOCdevkit/VOC2007`.  
-   **Fix:** `data/voc.py:31` → `self.voc_dir = self.root / "VOC2007"`
-
-3. **Editable install exposes nothing.**  
+3. **Editable install exposes nothing.** (open — decide before Phase 1)  
    `pyproject.toml` has `include = ["CandyEye*"]` but no package named
    `CandyEye` exists (modules are top-level `data/`, `core/`, … with **no
    `__init__.py`**). Result: `top_level.txt` is empty, and
@@ -84,9 +74,8 @@ Ordered by what to fix first. Items 1–2 **before** downloading.
    e.g. `candyeye/data/voc.py` + `__init__.py` files + matching
    `pyproject.toml` include.
 
-4. **`CandyEye.egg-info/` is tracked in git** (build artifact).  
-   **Fix:** `git rm -r --cached CandyEye.egg-info` + add `*.egg-info/` to
-   `.gitignore`.
+4. ~~**`CandyEye.egg-info/` is tracked in git.**~~ **FIXED** — untracked via
+   `git rm -r --cached`, ignored via `*.egg-info/` (files remain on disk).
 
 5. **`scripts/inspect_data.py` is 0 bytes** — written in this phase.
 
@@ -96,13 +85,12 @@ Ordered by what to fix first. Items 1–2 **before** downloading.
 
 ## Next actions
 
-1. Fix `.gitignore` (issue 1)
-2. Fix `data/voc.py:31` path (issue 2)
-3. `python scripts/download_voc.py` from repo root (~870 MB, verify counts)
-4. Write `scripts/inspect_data.py`, eyeball `runs/inspect_data.jpg`
-5. DataLoader smoke test
-6. Close acceptance checklist, commit, review → **Phase 1 (model)**
-7. *(before Phase 1)* decide on the packaging restructure (issue 3)
+1. Commit the issue 1/2/4 fixes
+2. `python scripts/download_voc.py` from repo root (~870 MB, verify counts)
+3. Write `scripts/inspect_data.py`, eyeball `runs/inspect_data.jpg`
+4. DataLoader smoke test
+5. Close acceptance checklist, commit, review → **Phase 1 (model)**
+6. *(before Phase 1)* decide on the packaging restructure (issue 3)
 
 ---
 
