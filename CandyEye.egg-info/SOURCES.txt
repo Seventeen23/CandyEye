@@ -1,0 +1,5 @@
+pyproject.toml
+CandyEye.egg-info/PKG-INFO
+CandyEye.egg-info/SOURCES.txt
+CandyEye.egg-info/dependency_links.txt
+CandyEye.egg-info/top_level.txt

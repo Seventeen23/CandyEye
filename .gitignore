@@ -1,0 +1,8 @@
+venv
+venv/
+.venv/
+__pycache__/
+data/
+runs/
+weights/
+*.pt

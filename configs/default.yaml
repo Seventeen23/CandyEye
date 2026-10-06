@@ -1,0 +1,7 @@
+data:
+  root: data/VOCdevkit
+  train_split: trainval
+  val_split: test
+model:
+  img_size: 128 # Divisible by 32
+  nc: 20
