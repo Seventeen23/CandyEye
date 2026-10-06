@@ -15,7 +15,7 @@ Status legend: `todo` · `in progress` · `done` · `blocked`
 - [x] `pyproject.toml`, `configs/default.yaml`, `.gitignore`
 - [x] `scripts/download_voc.py` (download / extract / verify / cleanup)
 - [x] `data/voc.py` — `VOCDataset` (XML parse, clamp, drop degenerate)
-- [ ] Run download, verify `trainval=5011` / `test=4952`
+- [x] Run download, verify `trainval=5011` / `test=4952`
 - [ ] `scripts/inspect_data.py` — draw GT boxes, eyeball correctness
 - [ ] DataLoader smoke test (`num_workers=2`)
 - [ ] Acceptance checklist in [STATUS.md](STATUS.md#acceptance-checklist)
