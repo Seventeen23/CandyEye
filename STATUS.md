@@ -1,17 +1,18 @@
 # Status — Current Phase
 
-**Phase 0: Environment & data — in progress**  
-Last updated: 2026-10-06 (after `84f7fed`; known issues 1/2/4 fixed — uncommitted)
+**Phase 0: Environment & data — COMPLETE (pending commit) → Phase 1: Model**  
+Last updated: 2026-10-07 (after `2e0a562`; Phase 0 closure edits uncommitted)
 
 ---
 
 ## Where we are
 
 ```
-Phase 0 ██░░░░░░░░  env done, dataset not yet downloaded
+Phase 0 ██████████ complete (awaiting commit)
+Phase 1 ░░░░░░░░░░ next — spec ready in SPECS.md
 ```
 
-Phases 1–8 not started — see [ROADMAP.md](ROADMAP.md).
+Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 
 ## Environment (verified on this machine)
 
@@ -34,20 +35,21 @@ Phases 1–8 not started — see [ROADMAP.md](ROADMAP.md).
 - [x] `configs/default.yaml` (img_size 128, nc 20, VOC07 splits)
 - [x] `scripts/download_voc.py` written (270 lines: download/extract/verify/cleanup)
 - [x] `data/voc.py` — `VOCDataset` written (XML parse, clamp, degenerate drop, difficult flag)
-- [ ] **Run** `scripts/download_voc.py` — dataset not on disk yet
-- [ ] `scripts/inspect_data.py` — file exists but is **empty (0 bytes)**
-- [ ] Acceptance checklist below
+- [x] **Run** `scripts/download_voc.py` — dataset on disk, verified
+- [x] `scripts/inspect_data.py` written **and run** — `runs/inspect_data.jpg` eyeball pass
+- [x] DataLoader smoke test — `batch=4, num_workers=2` iterates (named `collate_fn`, forkserver-safe)
+- [x] Acceptance checklist below complete
 
 ### Acceptance checklist
 
 | # | Check | Result |
 |---|---|---|
 | 1 | `import torch` → `2.14.1+cpu` | **pass** (verified) |
-| 2 | Download completes; `trainval=5011`, `test=4952` | not run |
-| 3 | `len(VOCDataset('data/VOCdevkit','trainval')) == 5011` | blocked (no data); import works from repo root |
-| 4 | `d[0]` shapes/dtypes/bounds correct | blocked |
-| 5 | `inspect_data.py` → `runs/inspect_data.jpg` eyeball pass | not written |
-| 6 | DataLoader `batch_size=4, num_workers=2` iterates | blocked |
+| 2 | Download completes; `trainval=5011`, `test=4952` | **pass** (verified) |
+| 3 | `len(VOCDataset('data/VOCdevkit','trainval')) == 5011` | **pass** (verified: 5011 / 4952) |
+| 4 | `d[0]` shapes/dtypes/bounds correct | **pass** (RGB uint8, boxes f32, labels i64 in 0–19, 100-sample bounds = 0 bad) |
+| 5 | `inspect_data.py` → `runs/inspect_data.jpg` eyeball pass | **pass** (232 KB, user eyeball 2026-10-07) |
+| 6 | DataLoader `batch_size=4, num_workers=2` iterates | **pass** (shapes `(375,500,3)`-style, boxes `[5,1,4,1]`) |
 | 7 | `df -h` ≥ 13 GB free | pass (17 GB) |
 
 ## Known issues
@@ -61,36 +63,35 @@ Phases 1–8 not started — see [ROADMAP.md](ROADMAP.md).
    `data/VOCdevkit/VOC2007/ImageSets/Main/trainval.txt` (matches download
    output).
 
-3. **Editable install exposes nothing.** (open — decide before Phase 1)  
-   `pyproject.toml` has `include = ["CandyEye*"]` but no package named
-   `CandyEye` exists (modules are top-level `data/`, `core/`, … with **no
-   `__init__.py`**). Result: `top_level.txt` is empty, and
-   `from data.voc import …` only works when cwd is the repo root — it fails
-   from anywhere else, and `python scripts/foo.py` fails outright
-   (`scripts/` becomes `sys.path[0]`, not the repo root).  
-   **Workaround until fixed:** run scripts from repo root with `PYTHONPATH=.`
-   (verified working).  
-   **Proper fix (decide before Phase 1):** restructure into a real package,
-   e.g. `candyeye/data/voc.py` + `__init__.py` files + matching
-   `pyproject.toml` include.
+3. ~~**Editable install exposes nothing.**~~ **RESOLVED (won't fix)** —
+   decision 2026-10-07: flat layout stays (`data/`, `model/`, … top-level,
+   no `__init__.py`), run from repo root with `PYTHONPATH=.`, `pyproject.toml`
+   left as-is. Scripts are always launched from the repo root anyway.
 
 4. ~~**`CandyEye.egg-info/` is tracked in git.**~~ **FIXED** — untracked via
    `git rm -r --cached`, ignored via `*.egg-info/` (files remain on disk).
 
-5. **`scripts/inspect_data.py` is 0 bytes** — written in this phase.
+5. ~~**`scripts/inspect_data.py` empty.**~~ **FIXED + RUN** — written,
+   executed, eyeball pass.
 
 6. *Minor:* `Tqdm_Download` class in `download_voc.py` is dead code (a second
    progress-bar impl, never used — `download_file` builds its own tqdm). Safe
    to delete whenever.
 
+7. *Note:* Python 3.14 forkserver DataLoader needs picklable worker args —
+   `collate_fn` must be module-level (`data/voc.py`), lambdas from `__main__`
+   raise `PicklingError`. Same rule applies to Phase 5's trainer.
+
+8. *Note:* empty `data/__init.py` / `scripts/__init.py` files exist (misnamed,
+   0 bytes) — unnecessary under flat layout; user to delete or rename.
+
 ## Next actions
 
-1. Commit the issue 1/2/4 fixes
-2. `python scripts/download_voc.py` from repo root (~870 MB, verify counts)
-3. Write `scripts/inspect_data.py`, eyeball `runs/inspect_data.jpg`
-4. DataLoader smoke test
-5. Close acceptance checklist, commit, review → **Phase 1 (model)**
-6. *(before Phase 1)* decide on the packaging restructure (issue 3)
+1. Commit Phase 0 closure (`inspect_data.py`, `data/voc.py` collate_fn,
+   STATUS.md, .gitignore egg-info/SPECS entries)
+2. **Phase 1 (model)** — spec ready in SPECS.md: blocks → YAML builder →
+   forward test, param assert 2,592,740
+3. User writes blocks, agent reviews per file
 
 ---
 

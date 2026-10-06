@@ -151,3 +151,13 @@ class VOCDataset(torch.utils.data.Dataset):
             "difficult": difficult,
             "img_id": img_id,
         }
+
+
+def collate_fn(batch: list[dict]) -> list[dict]:
+    """List collate: samples stay a list (variable image sizes / box counts).
+
+    Must be a module-level function: Python 3.14's forkserver DataLoader
+    start method pickles it, so lambdas from __main__ fail. Phase 3 replaces
+    this with resize+pad batching.
+    """
+    return batch

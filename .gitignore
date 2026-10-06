@@ -2,6 +2,7 @@ venv
 venv/
 .venv/
 __pycache__/
+SPECS.md
 data/downloads/
 data/VOCdevkit/
 *.egg-info/
