@@ -10,3 +10,4 @@ runs/
 weights/
 tmp/
 *.pt
+:memory:.ses
