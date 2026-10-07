@@ -1,0 +1,22 @@
+name: tiny_scratch
+model:
+  type: yolo
+  cfg: configs/yolo11.yaml
+  nc: 20
+  img_size: 128
+initialization:
+  type: scratch
+data:
+  root: data/VOCdevkit
+  train_split: trainval
+  batch_size: 16
+  workers: 0
+  mosaic_probability: 0.5
+train:
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0005
+  warmup_epochs: 3
+  min_lr_ratio: 0.01
+  seed: 23
+  output: runs/experiments/tiny_scratch

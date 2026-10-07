@@ -72,17 +72,17 @@ simultaneously over shared conv features — no mask branch, boxes only).
 
 **Goal:** all three configs train to completion on CPU.
 
-- [ ] `training/trainer.py` — AdamW, 3-ep warmup + cosine, ckpt/resume, logs
-- [ ] `core/backbone_mobilenet.py` — MobileNetV3-Small adapter (Experiment B)
-- [ ] Configs: `tiny_scratch`, `yolo11n_finetune`, `mobilenetv3_small`
-- [ ] Smoke run: 2–3 epochs, sane loss curves
+- [x] `training/trainer.py` — AdamW, 3-ep warmup + cosine, ckpt/resume, logs
+- [x] `core/backbone_mobilenet.py` — MobileNetV3-Small adapter (Experiment B)
+- [x] Configs: `tiny_scratch`, `yolo11n_finetune`, `mobilenetv3_small`
+- [x] Smoke run: 2 epochs, finite losses, checkpoints and CSV logs
 - [ ] Full runs:
 
 | Config | Init | Status |
 |---|---|---|
-| `tiny_scratch` | none | todo |
-| `yolo11n_finetune` | YOLO11n COCO, head reinit | todo |
-| `mobilenetv3_small` | ImageNet backbone | todo |
+| `tiny_scratch` | none | smoke pass; 100-epoch run pending |
+| `yolo11n_finetune` | YOLO11n COCO, head reinit | smoke pass; 100-epoch run pending |
+| `mobilenetv3_small` | ImageNet backbone | random-init smoke pass; ImageNet weights + 100-epoch run pending |
 
 ## Phase 6 — Evaluation
 

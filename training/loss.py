@@ -45,7 +45,7 @@ class DetectionLoss(nn.Module):
                  box_gain: float = 7.5, cls_gain: float = .5,
                  dfl_gain: float = 1.5):
         super().__init__()
-        detect = model.model[-1]
+        detect = model.model[-1] if hasattr(model, "model") else model.detect
         self.nc = detect.nc
         self.reg_max = detect.reg_max
         self.stride = detect.stride.detach().clone()

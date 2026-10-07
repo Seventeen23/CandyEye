@@ -1,7 +1,7 @@
 # Status — Current Phase
 
-**Phase 4: Assigner & loss — COMPLETE → Phase 5: Trainer (todo)**
-Last updated: 2026-10-07 (Phase 2 done in working tree; user commit pending)
+**Phase 5: Trainer & experiment matrix — IN PROGRESS**
+Last updated: 2026-10-07
 
 ---
 
@@ -13,7 +13,7 @@ Phase 1 ██████████ complete   (model, 5/5 tests, reviewed)
 Phase 2 ██████████ complete   (official weights load + ONNX parity + live demo)
 Phase 3 ██████████ complete  (data pipeline)
 Phase 4 ██████████ complete  (assigner & loss)
-Phase 5 ░░░░░░░░░░ todo       (trainer & experiment matrix)
+Phase 5 ██████░░░░ in progress (trainer implemented; full runs pending)
 ```
 
 Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
@@ -126,7 +126,8 @@ Bugs caught during build-out (all in `core/yolo.py`, now fixed):
 1. **Review → user commit** (working tree: `core/yolo.py` fixes, `core/convert_yolo11.py`,
    `inference/predict.py`, `tests/test_convert.py`, `scripts/bootstrap_weights.py`,
    `core/modules/conv.py` + `blocks.py` fixes) → Phase 3
-2. Phase 5 (trainer): checkpoints, schedule, logging, experiment configs
+2. Complete the three configured Phase 5 full training runs; MobileNet's
+   ImageNet checkpoint is not cached on this machine.
 
 ## Phase 2 checklist
 
@@ -185,6 +186,20 @@ Detect(nc=80)=464,912 matches the official model exactly.
   backward checks (**3 passed**)
 - [x] 32-image VOC overfit: AdamW lr=.001, batch=4, 10 epochs at 64px;
   mean loss 1038.80 → 148.22 (**85.7% reduction**, target >70%)
+
+## Phase 5 checklist
+
+- [x] `training/trainer.py` — CPU AdamW training, 3-epoch warmup + cosine,
+  CSV metrics, last/best checkpoints, and resume
+- [x] `core/backbone_mobilenet.py` — MobileNetV3-Small feature adapter, FPN,
+  and Detect head; optional torchvision ImageNet initialization
+- [x] Experiment configs for scratch, YOLO11n fine-tune, and MobileNetV3-Small
+- [x] Two-epoch smoke run for all three configs; all losses finite and
+  checkpoints/logs written
+- [x] Resume smoke: scratch run resumed at epoch 2 and finished epoch 3
+- [x] Full suite: **19 tests passed**
+- [ ] Full 100-epoch runs (CPU jobs estimated to take hours; MobileNet also
+  requires its ImageNet weights download)
 
 ---
 
