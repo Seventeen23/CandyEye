@@ -58,7 +58,9 @@ class Conv(nn.Module):
         self.conv = nn.Conv2d(
             c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False
         )
-        self.bn = nn.BatchNorm2d(c2)
+        # Official ultralytics BatchNorm uses eps=1e-3 (not the torch default
+        # 1e-5); eval inference must match, or every map drifts a little.
+        self.bn = nn.BatchNorm2d(c2, eps=1e-3, momentum=0.03)
         # The three-way ternary: bool True -> SiLU, bool False -> Identity,
         # otherwise assume the caller passed an nn.Module instance.
         self.act = (
@@ -70,6 +72,28 @@ class Conv(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Standard NCHW tensor in -> NCHW tensor out."""
         return self.act(self.bn(self.conv(x)))
+
+    def fuse(self) -> "Conv":
+        """Fold BatchNorm into the conv: gamma/sqrt(var+eps) scales the weights,
+        and the mean term becomes a bias. This is exactly the math the official
+        ONNX export bakes in, so after `fuse()` our state_dict keys line up with
+        the ONNX initializers (`model.0.conv.weight` + `.bias`, no `.bn.*`).
+        """
+        fused = torch.nn.utils.fusion.fuse_conv_bn_eval(self.conv, self.bn)
+        self.conv = nn.Conv2d(
+            self.conv.in_channels,
+            self.conv.out_channels,
+            self.conv.kernel_size,
+            self.conv.stride,
+            self.conv.padding,
+            self.conv.dilation,
+            self.conv.groups,
+            bias=True,
+        )
+        self.conv.weight.data.copy_(fused.weight.data)
+        self.conv.bias.data.copy_(fused.bias.data)
+        self.bn = nn.Identity()  # keep the attribute (loop-friendly), no params
+        return self
 
     def forward_fuse(self, x: torch.Tensor) -> torch.Tensor:
         """Same result as forward(), but WITHOUT bn/act — only used after
