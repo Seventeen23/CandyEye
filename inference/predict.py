@@ -18,7 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from torchvision.ops import nms
+from torchvision.ops import batched_nms
 
 from core.convert_yolo11 import load_official_state_dict, load_weights
 from core.yolo import YOLO
@@ -77,8 +77,9 @@ def predict(
 ):
     """Boxes+labels for one BGR image.  Returns list of (cls_id, score, xyxy)."""
     padded, meta = letterbox(im_bgr, size)
-    # BGR -> CHW -> float 0..1 (same pre-processing the official weights expect)
-    img = torch.from_numpy(padded).permute(2, 0, 1).float().div_(255).unsqueeze(0)
+    # BGR -> RGB -> CHW -> float 0..1 (same channel order as VOC training)
+    rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
+    img = torch.from_numpy(rgb).permute(2, 0, 1).float().div_(255).unsqueeze(0)
 
     model.eval()  # BatchNorm -> running stats; Detect -> decoded _inference
     with torch.no_grad():
@@ -95,7 +96,9 @@ def predict(
 
     cx, cy, w, h = boxes.unbind(1)
     xyxy = torch.stack((cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), 1)
-    sel = nms(xyxy, scores, iou_thr)[: max_det]
+    # Suppress boxes within a class while retaining overlapping objects from
+    # different classes, as expected by multi-class detection evaluation.
+    sel = batched_nms(xyxy, scores, cls_ids, iou_thr)[: max_det]
 
     scale, (dx, dy) = meta["scale"], meta["pad"]
     mapped = (xyxy[sel] - torch.tensor([dx, dy, dx, dy])) / scale  # original px

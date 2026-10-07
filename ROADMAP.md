@@ -88,10 +88,11 @@ simultaneously over shared conv features — no mask branch, boxes only).
 
 **Goal:** comparable accuracy numbers.
 
-- [ ] VOC mAP@0.5 (all-point interpolation)
-- [ ] Toy-example unit test (hand-computed)
-- [ ] Difficult-flag handling
-- [ ] mAP table per checkpoint
+- [x] VOC mAP@0.5 (all-point interpolation)
+- [x] Toy-example unit test (hand-computed)
+- [x] Difficult-flag handling
+- [x] mAP table per checkpoint (CSV evaluator)
+- [ ] Full VOC test-split results for trained checkpoints
 
 ## Phase 7 — Inference polish
 

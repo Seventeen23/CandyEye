@@ -1,6 +1,6 @@
 # Status — Current Phase
 
-**Phase 5: Trainer & experiment matrix — IN PROGRESS**
+**Phase 6: Evaluation — IN PROGRESS (Phase 5 full runs remain pending)**
 Last updated: 2026-10-07
 
 ---
@@ -14,6 +14,7 @@ Phase 2 ██████████ complete   (official weights load + ONNX 
 Phase 3 ██████████ complete  (data pipeline)
 Phase 4 ██████████ complete  (assigner & loss)
 Phase 5 ██████░░░░ in progress (trainer implemented; full runs pending)
+Phase 6 ███████░░░ in progress (mAP evaluator implemented; full split pending)
 ```
 
 Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
@@ -123,11 +124,10 @@ Bugs caught during build-out (all in `core/yolo.py`, now fixed):
 
 ## Next actions
 
-1. **Review → user commit** (working tree: `core/yolo.py` fixes, `core/convert_yolo11.py`,
-   `inference/predict.py`, `tests/test_convert.py`, `scripts/bootstrap_weights.py`,
-   `core/modules/conv.py` + `blocks.py` fixes) → Phase 3
-2. Complete the three configured Phase 5 full training runs; MobileNet's
-   ImageNet checkpoint is not cached on this machine.
+1. Complete Phase 5's three 100-epoch CPU experiment runs (MobileNet needs its
+   ImageNet weights download).
+2. Evaluate the resulting checkpoints on the full VOC test split and record
+   comparable mAP values.
 
 ## Phase 2 checklist
 
@@ -200,6 +200,17 @@ Detect(nc=80)=464,912 matches the official model exactly.
 - [x] Full suite: **19 tests passed**
 - [ ] Full 100-epoch runs (CPU jobs estimated to take hours; MobileNet also
   requires its ImageNet weights download)
+
+## Phase 6 checklist
+
+- [x] `eval/map.py` — IoU matching and all-point interpolated AP@0.5; mean over
+  classes with non-difficult ground truth
+- [x] Difficult-object matches are ignored rather than counted as TP or FP
+- [x] `tests/test_map.py` — hand-computed AP (5/6) and difficult-object case
+- [x] `scripts/evaluate.py` — loads experiment checkpoints and writes per-class
+  AP plus mAP@0.5 to a CSV table
+- [x] Evaluator smoke: scratch checkpoint on 4 VOC test images; CSV written
+- [ ] Full VOC test-split evaluation for trained checkpoints
 
 ---
 
