@@ -9,7 +9,7 @@ Last updated: 2026-10-07 (through `da54fd9`; Phase 1 started: `core/` layout)
 
 ```
 Phase 0 ██████████ complete
-Phase 1 █░░░░░░░░░ in progress — Conv ✓, blocks next (spec in SPECS.md)
+Phase 1 ██████░░░░ in progress — Conv/blocks/Detect ✓ (param-exact); builder + tests next
 ```
 
 Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
@@ -87,11 +87,14 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 
 ## Next actions
 
-1. **Phase 1 continued** — `core/modules/blocks.py` (Bottleneck → C3k →
-   C3k2 → SPPF → Attention/PSABlock → C2PSA), spec + paste-boxes in SPECS.md
-2. `core/modules/detect.py` (DFL + Detect) → `configs/yolo11.yaml` →
-   `core/yolo.py` builder → shape/param tests
-3. Review → commit each step → Phase 2 (weight loading)
+1. `configs/yolo11.yaml` (layer table from SPECS) + `core/yolo.py` builder
+   (ModuleList assembly, `-1`/list `from`, channel scaling, stride fill)
+2. `tests/test_model.py` — shapes + `params == 2,593,740` + grad flow + key layout
+3. Review → commit → Phase 2 (weight loading from official `yolo11n.pt`)
+
+**Param target corrected 2026-10-07:** nc=20 total is **2,593,740**
+(layers 0–22 = 2,159,168 + Detect = 434,572); earlier 2,592,740 was off by 1k.
+Detect(nc=80)=464,912 matches the official model exactly.
 
 ---
 

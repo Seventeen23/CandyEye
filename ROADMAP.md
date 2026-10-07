@@ -37,7 +37,7 @@ simultaneously over shared conv features — no mask branch, boxes only).
 - [ ] `core/modules/detect.py` — DFL + Detect (parallel box/class branches)
 - [ ] `configs/yolo11.yaml` — architecture transcription, nc=20, scale `n`
 - [ ] `core/yolo.py` — YAML parser/builder + forward graph
-- [ ] Shape tests: `1×3×128×128` → P3/P4/P5 correct channels, param count 2,592,740
+- [ ] Shape tests: `1×3×128×128` → P3/P4/P5 correct channels, param count 2,593,740
 
 ## Phase 2 — Pretrained demo (Experiment A)
 

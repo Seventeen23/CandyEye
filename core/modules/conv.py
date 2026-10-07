@@ -9,6 +9,8 @@ stateful layers (anything with weights) live in modules/.
 """
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
@@ -75,3 +77,15 @@ class Conv(nn.Module):
         export). Writing it now keeps the interface stable.
         """
         return self.act(self.conv(x))
+
+
+class DWConv(Conv):
+    """Depthwise convolution: `groups == gcd(c1, c2)`, so for c1 == c2 each
+    channel is filtered on its own. This is the MobileNet efficiency trick —
+    a k×k depthwise conv costs ~1/k² of a normal one. Used by the Detect
+    class branch (cv3) to keep the head cheap.
+    """
+
+    def __init__(self, c1: int, c2: int, k: int = 1, s: int = 1, d: int = 1,
+                 act: bool | nn.Module = True):
+        super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
