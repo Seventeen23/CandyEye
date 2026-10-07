@@ -11,7 +11,7 @@ def autopad(k: int, p: int | None = None, d: int = 1) -> int:
     """Compute padding that keeps the feature map the SAME size ("same"
     padding) for a conv with kernel size k and dilation d.
 
-    Why: Conv2d with stride 1 and padding=k//2 outputs the same H×W as the
+    Why: Conv2d with stride 1 and padding=k//2 outputs the same HxW as the
     input, so the block author never has to do this arithmetic by hand.
 
     If p is given explicitly we just use it (lets callers opt out), which is
