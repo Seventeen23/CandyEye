@@ -17,6 +17,7 @@ The result is an ``nn.Sequential`` indexed exactly like the official yolo11n
 """
 from __future__ import annotations
 
+import ast
 import copy
 from pathlib import Path
 
@@ -70,14 +71,20 @@ def parse_model(data: dict) -> nn.Sequential:
     depth, width, max_channels = _SCALES[scale]
 
     x = data["backbone"] + data["head"]
-    layers, ch = [], [3]  # ch[0] = image channels feeding layer 0
+    layers, ch, cur = [], {}, 3  # ch[i] = out channels of layer i; cur = last output
 
     for i, (f, n, m, args) in enumerate(x):
         args = [nc if a == "nc" else a for a in args]
+        for j, a in enumerate(args):
+            if isinstance(a, str) and a != "nc":
+                try:
+                    args[j] = ast.literal_eval(a)  # "None" -> None, keep "nearest"
+                except (ValueError, SyntaxError):
+                    pass
         n = max(round(n * depth), 1)
 
         if m in _CHANNEL_MODULES:
-            c1, c2 = ch[f], args[0]
+            c1, c2 = cur, args[0]
             if c2 != nc:
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             args = [c1, c2, *args[1:]]
@@ -85,11 +92,11 @@ def parse_model(data: dict) -> nn.Sequential:
                 args.insert(2, n)  # repeats slot inside the block
                 n = 1
         elif m == "nn.Upsample":
-            c2 = ch[f]
+            c2 = cur
         elif m == "Concat":
-            c2 = sum(ch[x] for x in f)
+            c2 = sum(cur if x == -1 else ch[x] for x in f)
         elif m == "Detect":
-            args.append([ch[x] for x in f])
+            args.append([cur if x == -1 else ch[x] for x in f])
             c2 = nc  # not referenced downstream; placeholder
         else:
             raise ValueError(f"unhandled module {m!r}")
@@ -104,10 +111,11 @@ def parse_model(data: dict) -> nn.Sequential:
         module.type = m
         module.i = i  # absolute index
         module.f = f  # from-list (int or list of ints)
-        module.n = n  # repeats used
+        module.rep = n  # repeats used (rep avoids clobbering SPPF/C2PSA self.n)
 
         layers.append(module)
-        ch.append(c2)
+        ch[i] = c2
+        cur = c2
     return nn.Sequential(*layers)
 
 
@@ -151,7 +159,7 @@ class YOLO(nn.Module):
     def _detect_stride(self, img_size: int) -> torch.Tensor:
         """Feed a blank image and infer P3/P4/P5 strides from output sizes."""
         with torch.no_grad():
-            feats = self.model(torch.zeros(1, 3, img_size, img_size))
+            feats = self(torch.zeros(1, 3, img_size, img_size))
         if not isinstance(feats, (list, tuple)):
             return torch.ones(1)
         return torch.tensor([img_size / f.shape[-2] for f in feats])

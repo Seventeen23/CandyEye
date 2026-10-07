@@ -1,7 +1,7 @@
 # Status — Current Phase
 
 **Phase 0: Environment & data — COMPLETE → Phase 1: Model (in progress)**  
-Last updated: 2026-10-07 (through `da54fd9`; Phase 1 started: `core/` layout)
+Last updated: 2026-10-07 (Phase 1 builder done: `0925560` + working tree)
 
 ---
 
@@ -9,7 +9,7 @@ Last updated: 2026-10-07 (through `da54fd9`; Phase 1 started: `core/` layout)
 
 ```
 Phase 0 ██████████ complete
-Phase 1 ██████░░░░ in progress — Conv/blocks/Detect ✓ (param-exact); builder + tests next
+Phase 1 █████████░ in progress — Conv/blocks/Detect ✓, yaml+builder+tests ✓, review → commit → Phase 2
 ```
 
 Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
@@ -85,12 +85,45 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 8. *Note:* empty `data/__init.py` / `scripts/__init.py` files exist (misnamed,
    0 bytes) — unnecessary under flat layout; user to delete or rename.
 
+## Phase 1 checklist
+
+- [x] `core/functions/layer_utils.py` — autopad, make_divisible
+- [x] `core/modules/conv.py` — Conv (+DWConv) (params/keys match official layer 0)
+- [x] `core/modules/blocks.py` — Bottleneck/C3k/C3k2/SPPF/Attention/PSABlock/C2PSA (param-exact, verified)
+- [x] `core/modules/detect.py` — DFL + Detect (parallel box/class branches, param-exact)
+- [x] `configs/yolo11.yaml` — architecture transcription, nc=20, scale `n`
+- [x] `core/yolo.py` — YAML parser/builder + forward graph (stride fill, imgsz guard)
+- [x] `tests/test_model.py` — **5/5 pass** (`pytest tests/test_model.py -q`)
+
+### Phase 1 acceptance
+
+| Check | Result |
+|---|---|
+| build + forward `(1,3,128,128)` → `[(1,84,16,16),(1,84,8,8),(1,84,4,4)]` | **pass** |
+| `sum(p.numel()) == 2_593_740` (trainable 2,593,724; DFL 16 frozen) | **pass** (backbone+neck 2,159,168; Detect 434,572) |
+| strides `[8, 16, 32]`; eval decode `(1,24,336)` | **pass** |
+| backward: all grads present / finite / nonzero | **pass** |
+| key layout `model.0.conv.weight` … `model.23.dfl.conv.weight` | **pass** |
+| conv-weight keys vs official ONNX (model.2/10/23) | **pass** — only `*.bn.*` differ, and that's ONNX BN-fusion (official `.pt` keeps them) |
+| `imgsz` guard rejects 127 | **pass** |
+
+Bugs caught during build-out (all in `core/yolo.py`, now fixed):
+1. `module.n = n` clobbered `SPPF.self.n` (pool count 3→1) and `C2PSA.n` →
+   wrapped as `.rep`.
+2. `ch[i]` was layer-`i-1` output → absolute refs (`ch[16]`=192, `[13]`=256)
+   inflated Detect → replaced with `ch = {i: c2}` + `cur` for `-1`.
+3. YAML `[None, 2, "nearest"]` parses `None` as the *string* `"None"` (YAML
+   null is `null`/`~`) → `ast.literal_eval` on string args (mirrors official).
+4. `_detect_stride` ran `nn.Sequential`'s forward, which can't feed Concat a
+   list → stride now computed via our own manual loop (`self(...)`).
+
 ## Next actions
 
-1. `configs/yolo11.yaml` (layer table from SPECS) + `core/yolo.py` builder
-   (ModuleList assembly, `-1`/list `from`, channel scaling, stride fill)
-2. `tests/test_model.py` — shapes + `params == 2,593,740` + grad flow + key layout
-3. Review → commit → Phase 2 (weight loading from official `yolo11n.pt`)
+1. **Review → user commit** (working tree: `configs/yolo11.yaml`, `core/yolo.py`,
+   `tests/test_model.py`) → Phase 2
+2. Phase 2 (pretrained demo): `core/convert_yolo11.py` state_dict converter
+   (**0 missing / 0 unexpected** → nc=20 skip/reinit `model.23.cv3.*`), NMS,
+   draw, letterbox forward parity
 
 **Param target corrected 2026-10-07:** nc=20 total is **2,593,740**
 (layers 0–22 = 2,159,168 + Detect = 434,572); earlier 2,592,740 was off by 1k.

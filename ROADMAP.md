@@ -33,11 +33,11 @@ simultaneously over shared conv features — no mask branch, boxes only).
 
 - [x] `core/functions/layer_utils.py` — autopad, make_divisible
 - [x] `core/modules/conv.py` — Conv (verified: params/keys match official layer 0)
-- [ ] `core/modules/blocks.py` — Bottleneck, C3k, C3k2, SPPF, Attention, PSABlock, C2PSA
-- [ ] `core/modules/detect.py` — DFL + Detect (parallel box/class branches)
-- [ ] `configs/yolo11.yaml` — architecture transcription, nc=20, scale `n`
-- [ ] `core/yolo.py` — YAML parser/builder + forward graph
-- [ ] Shape tests: `1×3×128×128` → P3/P4/P5 correct channels, param count 2,593,740
+- [x] `core/modules/blocks.py` — Bottleneck, C3k, C3k2, SPPF, Attention, PSABlock, C2PSA
+- [x] `core/modules/detect.py` — DFL + Detect (parallel box/class branches)
+- [x] `configs/yolo11.yaml` — architecture transcription, nc=20, scale `n`
+- [x] `core/yolo.py` — YAML parser/builder + forward graph
+- [x] Shape tests: `1×3×128×128` → P3/P4/P5 correct channels, param count 2,593,740
 
 ## Phase 2 — Pretrained demo (Experiment A)
 
