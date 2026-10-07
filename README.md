@@ -80,10 +80,10 @@ CandyEye/
 │   ├── modules/                # nn.Module blocks (Conv ✓ · Bottleneck, C3k2,
 │   │                            #   SPPF, C2PSA, DFL, Detect        Phase 1)
 │   ├── yolo.py                 # YAML builder + forward graph     (Phase 1)
-│   └── convert_yolo11.py       # yolo11n.pt → our state_dict      (Phase 2)
+│   └── convert_yolo11.py       # yolo11n.pt / ONNX → our state_dict (Phase 2)
 ├── training/                   # assigner, loss, trainer          (Phases 4–5)
 ├── eval/                       # mAP@0.5                          (Phase 6)
-├── inference/                  # predict, visualize               (Phase 7)
+├── inference/                  # predict.py already (Phase 2 preview of 7)
 ├── export/                     # ONNX export, benchmark, INT8     (Phase 8)
 ├── scripts/                    # download_voc, inspect_data, train/eval/predict CLIs
 ├── runs/                       # outputs (gitignored)

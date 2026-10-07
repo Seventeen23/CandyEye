@@ -43,11 +43,12 @@ simultaneously over shared conv features — no mask branch, boxes only).
 
 **Goal:** official `yolo11n.pt` loads and detects on sample images, from our code.
 
-- [ ] Download `yolo11n.pt` → plain state_dict converter (`core/convert_yolo11.py`)
-- [ ] Converter check: **0 missing / 0 unexpected keys**
-- [ ] Minimal inference: letterbox → forward → DFL projection → NMS → draw
-- [ ] Visual check: COCO detections on sample images @ 128×128
-- [ ] Unit test: forward parity vs converter output
+- [x] Download `yolo11n.pt` → plain state_dict converter (`core/convert_yolo11.py`)
+- [x] Converter check: **0 missing / 0 unexpected keys** (nc=80 full; nc=20 = exactly the class branch)
+- [x] Minimal inference: letterbox → forward → DFL projection → NMS → draw (`inference/predict.py`)
+- [x] Visual check: COCO detections on `bus.jpg` / `zidane.jpg` @ 640×640
+- [x] Unit test: numerical parity vs official ONNX (fused fp32, `tests/test_convert.py`)
+- [x] Parity fixes surfaced by the test: BatchNorm `eps=1e-3` (not torch default 1e-5) and SPPF `cv1` uses SiLU — both now bit-exact vs the official runtime
 
 ## Phase 3 — Data pipeline
 

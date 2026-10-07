@@ -8,4 +8,5 @@ data/VOCdevkit/
 *.egg-info/
 runs/
 weights/
+tmp/
 *.pt

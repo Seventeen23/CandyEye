@@ -1,7 +1,7 @@
 # Status — Current Phase
 
-**Phase 0: Environment & data — COMPLETE → Phase 1: Model (in progress)**  
-Last updated: 2026-10-07 (Phase 1 builder done: `0925560` + working tree)
+**Phase 2: Pretrained demo — COMPLETE → Phase 3: Data pipeline (todo)**  
+Last updated: 2026-10-07 (Phase 2 done in working tree; user commit pending)
 
 ---
 
@@ -9,7 +9,9 @@ Last updated: 2026-10-07 (Phase 1 builder done: `0925560` + working tree)
 
 ```
 Phase 0 ██████████ complete
-Phase 1 █████████░ in progress — Conv/blocks/Detect ✓, yaml+builder+tests ✓, review → commit → Phase 2
+Phase 1 ██████████ complete   (model, 5/5 tests, reviewed)
+Phase 2 ██████████ complete   (official weights load + ONNX parity + live demo)
+Phase 3 █░░░░░░░░░ todo       (data pipeline)
 ```
 
 Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
@@ -119,11 +121,35 @@ Bugs caught during build-out (all in `core/yolo.py`, now fixed):
 
 ## Next actions
 
-1. **Review → user commit** (working tree: `configs/yolo11.yaml`, `core/yolo.py`,
-   `tests/test_model.py`) → Phase 2
-2. Phase 2 (pretrained demo): `core/convert_yolo11.py` state_dict converter
-   (**0 missing / 0 unexpected** → nc=20 skip/reinit `model.23.cv3.*`), NMS,
-   draw, letterbox forward parity
+1. **Review → user commit** (working tree: `core/yolo.py` fixes, `core/convert_yolo11.py`,
+   `inference/predict.py`, `tests/test_convert.py`, `scripts/bootstrap_weights.py`,
+   `core/modules/conv.py` + `blocks.py` fixes) → Phase 3
+2. Phase 3 (data pipeline): letterbox/resize/augment collate + batch viz
+
+## Phase 2 checklist
+
+- [x] `scripts/bootstrap_weights.py` — dev-only ultralytics use; official `.pt` → clean `weights/yolo11n.pth` (499 tensors, fp16-source) + `runs/bus.jpg` / `runs/zidane.jpg`
+- [x] `core/convert_yolo11.py` — shape-checked loader `load_weights` (loaded/skipped/unexpected) + `EXPECTED_NC20_SKIPPED` (51 unfused) + `load_fused_from_onnx` + `EXPECTED_FUSED_NC20_SKIPPED` (24)
+- [x] `inference/predict.py` — letterbox → forward → DFL decode → torchvision NMS → cv2 draw
+- [x] `YOLO.fuse()` — BN folded into convs (state_dict then matches ONNX initializers 1:1)
+- [x] `tests/test_convert.py` — **10/10 pass** (`pytest tests/ -q`)
+
+### Phase 2 acceptance
+
+| Check | Result |
+|---|---|
+| nc=80 full load: 0 missing / 0 unexpected, params 2,624,080 | **pass** |
+| nc=20 sparse load: exactly the class-branch skip set, params 2,593,740 | **pass** (51 unfused / 24 fused) |
+| fused layout == official ONNX key set (no `.bn.*`) | **pass** |
+| num parity vs official ONNX @640 (fp32 initializer load): boxes < 1e-2, cls < 1e-4 | **pass** (box ~3e-3, cls ~4e-7) |
+| arch parity vs ultralytics runtime, same src weights: every module bit-exact (0.000000) | **pass** |
+| demo: `bus.jpg` nc=80 → bus 0.92; `zidane.jpg` nc=80 → tie/car; `bus.jpg` nc=20 → pipeline proof | **pass** (real COCO detections) |
+
+Bugs caught via parity testing (in core, now fixed):
+1. **BatchNorm `eps`** — official ultralytics uses `eps=1e-3` (+`momentum=0.03`); our Conv used the torch default `1e-5`. Every map drifted a little (first symptom: layer-0 maxdiff ~10).
+2. **SPPF `cv1` activation** — ours used `act=False`; official `SPPF.cv1` is a plain `Conv` with SiLU. Divergence appeared exactly at module 9.
+
+Details: the `.pt`/`.pth` ship fp16 weights, so "checkpoint-load" parity vs the fp32 ONNX is ~1e-3 noise; the exact parity test therefore loads the ONNX's own fused fp32 initializers into a `fuse()`d model.
 
 **Param target corrected 2026-10-07:** nc=20 total is **2,593,740**
 (layers 0–22 = 2,159,168 + Detect = 434,572); earlier 2,592,740 was off by 1k.
