@@ -89,6 +89,10 @@ class TaskAlignedAssigner(nn.Module):
             max_metric = metric.masked_fill(~positives, 0).amax(1, keepdim=True)
             max_iou = ious.masked_fill(~positives, 0).amax(1, keepdim=True)
             quality = (metric * max_iou / (max_metric + self.eps)).amax(0)
+            # Scratch initialization can produce almost-zero IoUs. Keeping a
+            # minimum positive target prevents box/class gradients from
+            # vanishing before the detector learns its first useful boxes.
+            quality = quality.clamp(min=0.25)
             target_scores[b, assigned, local_labels[assigned]] = quality[assigned]
 
         return {"labels": target_labels, "boxes": target_boxes,

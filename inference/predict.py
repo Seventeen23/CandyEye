@@ -1,23 +1,12 @@
-"""Minimal detection demo: letterbox -> forward -> decode -> NMS -> draw.
-
-Run at nc=20 (the VOC training model) or nc=80 (full official load):
-  PYTHONPATH=. venv/bin/python inference/predict.py runs/bus.jpg --nc 80
-  PYTHONPATH=. venv/bin/python inference/predict.py runs/bus.jpg --nc 20
-
-nc=80 gives *real* COCO detections (every official weight loads 1:1).
-nc=20 skips/randomises the class branch (the `cv3` classification convs, see
-core/convert_yolo11.py), so classes are placeholders until Phase 4 fine-tuning
-— the image then proves the letterbox->forward->DFL-decode->NMS->draw
-pipeline, not accuracy.
-"""
+"""Run CandyEye on one image or a video and save the annotated result."""
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
+import yaml
 from torchvision.ops import batched_nms
 
 from core.convert_yolo11 import load_official_state_dict, load_weights
@@ -98,13 +87,18 @@ def predict(
     xyxy = torch.stack((cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), 1)
     # Suppress boxes within a class while retaining overlapping objects from
     # different classes, as expected by multi-class detection evaluation.
-    sel = batched_nms(xyxy, scores, cls_ids, iou_thr)[: max_det]
-
     scale, (dx, dy) = meta["scale"], meta["pad"]
-    mapped = (xyxy[sel] - torch.tensor([dx, dy, dx, dy])) / scale  # original px
+    mapped = (xyxy - torch.tensor([dx, dy, dx, dy])) / scale  # original px
+    mapped[:, [0, 2]] = mapped[:, [0, 2]].clamp(0, im_bgr.shape[1])
+    mapped[:, [1, 3]] = mapped[:, [1, 3]].clamp(0, im_bgr.shape[0])
+    valid = (mapped[:, 2] > mapped[:, 0]) & (mapped[:, 3] > mapped[:, 1])
+    mapped, scores, cls_ids = mapped[valid], scores[valid], cls_ids[valid]
+    if not mapped.numel():
+        return []
+    sel = batched_nms(mapped, scores, cls_ids, iou_thr)[:max_det]
     dets = [
         (int(cls_ids[i].item()), float(scores[i].item()), mapped[i].tolist())
-        for i in range(len(sel))
+        for i in sel.tolist()
     ]
     return dets
 
@@ -125,36 +119,119 @@ def draw(im_bgr: np.ndarray, dets, names, palette=None) -> np.ndarray:
     return out
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("image", type=Path)
-    parser.add_argument("--nc", type=int, default=20, choices=(20, 80))
-    parser.add_argument("--size", type=int, default=128)
-    parser.add_argument("--conf", type=float, default=0.35)
-    parser.add_argument("--iou", type=float, default=0.45)
-    parser.add_argument("--out", type=Path, default=None)
-    parser.add_argument("--cfg", default="configs/yolo11.yaml")
-    parser.add_argument("--weights", default="weights/yolo11n.pth")
-    parser.add_argument("--noprint", action="store_true")
-    args = parser.parse_args()
+class CandyEyePredictor:
+    """Load a CandyEye checkpoint and predict on image or video files.
 
-    model = CandyEye(args.cfg, nc=args.nc, img_size=args.size)
-    load_weights(model, load_official_state_dict(args.weights), verbose=True)
+    Example::
 
-    im = cv2.imread(str(args.image))
-    if im is None:
-        raise SystemExit(f"cannot read image: {args.image}")
-    names = VOC_NAMES if args.nc == 20 else COCO_NAMES
-    dets = predict(model, im, size=args.size, conf=args.conf, iou_thr=args.iou)
+        predictor = CandyEyePredictor("runs/train/exp/best.pt", data="dataset.yaml")
+        result = predictor.predict("image.jpg")
+    """
 
-    out_path = args.out or (args.image.parent / "predict.jpg")
-    cv2.imwrite(str(out_path), draw(im, dets, names))
-    print(f"saved: {out_path}  ({len(dets)} detections)")
-    if not args.noprint:
-        for cls_id, score, xyxy in dets[:10]:
-            print(f"  {names[cls_id]:14s} {score:.3f} {[round(v,1) for v in xyxy]}")
-    return 0
+    VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
+    def __init__(self, weights: str | Path, *, data: str | Path | None = None,
+                 cfg: str | Path = "configs/yolo11.yaml", imgsz: int = 128,
+                 nc: int | None = None, output_dir: str | Path = "runs/predict"):
+        self.weights = Path(weights)
+        self.output_dir = Path(output_dir)
+        self.imgsz = imgsz
+        if self.weights.suffix.lower() == ".pt":
+            payload = torch.load(self.weights, map_location="cpu", weights_only=False)
+            state = payload.get("model", payload) if isinstance(payload, dict) else payload
+            saved_config = payload.get("config", {}) if isinstance(payload, dict) else {}
+        else:
+            state, saved_config = None, {}
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+        data_config = {}
+        if data is not None:
+            with Path(data).open(encoding="utf-8") as stream:
+                data_config = yaml.safe_load(stream) or {}
+        data_section = data_config.get("data", data_config)
+        saved_data = saved_config.get("data", {})
+        saved_model = saved_config.get("model", {})
+        names = data_section.get("names") or saved_data.get("names")
+        if isinstance(names, dict):
+            names = [names[key] for key in sorted(names, key=lambda item: int(item))]
+        self.nc = int(nc or data_section.get("nc") or saved_model.get("nc")
+                      or (len(names) if names else 20))
+        if names is None:
+            names = VOC_NAMES if self.nc == 20 else (
+                COCO_NAMES if self.nc == 80 else [str(i) for i in range(self.nc)])
+        if len(names) != self.nc:
+            raise ValueError(f"class names has {len(names)} entries but model nc={self.nc}")
+        data_nc = data_section.get("nc")
+        if data_nc is not None and int(data_nc) != self.nc:
+            raise ValueError(f"dataset YAML has nc={data_nc}, but model has nc={self.nc}")
+        self.names = names
+
+        self.model = CandyEye(cfg, nc=self.nc, img_size=imgsz)
+        if state is not None:
+            self.model.load_state_dict(state)
+        else:
+            load_weights(self.model, load_official_state_dict(str(self.weights)))
+        self.model.eval()
+
+    def predict_image(self, source: str | Path | np.ndarray, *, output=None,
+                      conf: float = 0.25, iou: float = 0.45,
+                      max_det: int = 100) -> dict:
+        """Predict one BGR image; save an annotated image and return detections."""
+        if isinstance(source, np.ndarray):
+            image = source
+            stem = "image"
+        else:
+            source = Path(source)
+            image = cv2.imread(str(source))
+            if image is None:
+                raise FileNotFoundError(f"could not read image: {source}")
+            stem = source.stem
+        detections = predict(self.model, image, self.imgsz, conf, iou, max_det)
+        output_path = Path(output) if output else self.output_dir / f"{stem}_pred.jpg"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(output_path), draw(image, detections, self.names)):
+            raise OSError(f"could not save annotated image: {output_path}")
+        return {"output": output_path, "detections": detections}
+
+    def predict_video(self, source: str | Path, *, output=None,
+                      conf: float = 0.25, iou: float = 0.45,
+                      max_det: int = 100) -> dict:
+        """Predict every frame of a video and save an annotated MP4."""
+        source = Path(source)
+        capture = cv2.VideoCapture(str(source))
+        if not capture.isOpened():
+            raise FileNotFoundError(f"could not open video: {source}")
+        output_path = Path(output) if output else self.output_dir / f"{source.stem}_pred.mp4"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        if not np.isfinite(fps) or fps <= 0:
+            fps = 30.0
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        writer = cv2.VideoWriter(
+            str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
+        )
+        if not writer.isOpened():
+            capture.release()
+            raise OSError(f"could not create output video: {output_path}")
+        frame_count = 0
+        try:
+            while True:
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                detections = predict(self.model, frame, self.imgsz, conf, iou, max_det)
+                writer.write(draw(frame, detections, self.names))
+                frame_count += 1
+        finally:
+            capture.release()
+            writer.release()
+        return {"output": output_path, "frames": frame_count}
+
+    def predict(self, source: str | Path | np.ndarray, **kwargs) -> dict:
+        """Predict an image array, image file, or video file and save the result."""
+        if isinstance(source, np.ndarray):
+            return self.predict_image(source, **kwargs)
+        source = Path(source)
+        if source.suffix.lower() in self.VIDEO_SUFFIXES:
+            return self.predict_video(source, **kwargs)
+        return self.predict_image(source, **kwargs)

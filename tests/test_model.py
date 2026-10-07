@@ -22,6 +22,17 @@ def test_forward_shapes_and_strides():
     assert m.stride.tolist() == [8.0, 16.0, 32.0]
 
 
+def test_eval_can_return_raw_maps_for_validation_loss():
+    m = make(img_size=64, nc=2).eval()
+    raw = m(torch.randn(1, 3, 64, 64), decode=False)
+    decoded = m(torch.randn(1, 3, 64, 64))
+
+    assert [tuple(x.shape) for x in raw] == [
+        (1, 66, 8, 8), (1, 66, 4, 4), (1, 66, 2, 2)
+    ]
+    assert tuple(decoded.shape) == (1, 6, 84)
+
+
 def test_param_count():
     assert sum(p.numel() for p in make().parameters()) == 2_593_740
 

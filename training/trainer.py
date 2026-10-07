@@ -17,7 +17,8 @@ from core.convert_yolo11 import load_official_state_dict, load_weights
 from core import CandyEye
 from data.transforms import Compose, HSVJitter, RandomHorizontalFlip
 from data.yolo import YoloTxtDataset
-from data.voc import VOCDataset, collate_fn
+from data.voc import VOC_CLASSES, VOCDataset, collate_fn
+from eval.detection_metrics import evaluate_detector
 from training.loss import DetectionLoss
 
 
@@ -84,13 +85,13 @@ def run_training(config: dict, *, epochs: int | None = None,
     device = torch.device("cpu")
     model = (model or build_experiment_model(
         config, no_pretrained=no_pretrained)).to(device)
+    model_nc = int(getattr(model, "nc", model.model[-1].nc))
 
     augment = Compose(train_cfg.get(
         "api_transforms", [HSVJitter(), RandomHorizontalFlip()]))
     img_size = int(model_cfg.get("img_size", 128))
     mosaic_probability = float(data_cfg.get("mosaic_probability", 0.0))
     if data_cfg.get("format") == "yolo_txt":
-        model_nc = int(getattr(model, "nc", model.model[-1].nc))
         data_nc = int(data_cfg.get("nc", 0))
         if data_nc and data_nc != model_nc:
             raise ValueError(
@@ -102,14 +103,29 @@ def run_training(config: dict, *, epochs: int | None = None,
             mosaic_probability=mosaic_probability,
             num_classes=data_cfg.get("nc") or None,
         )
+        val_dataset = YoloTxtDataset(
+            data_cfg["val_images"], img_size=img_size,
+            num_classes=data_cfg.get("nc") or None,
+        )
+        class_names = data_cfg.get("names") or [str(i) for i in range(model_nc)]
     else:
         dataset = VOCDataset(
             data_cfg.get("root", "data/VOCdevkit"),
             data_cfg.get("train_split", "trainval"), transform=augment,
             img_size=img_size, mosaic_probability=mosaic_probability,
         )
+        val_dataset = VOCDataset(
+            data_cfg.get("root", "data/VOCdevkit"),
+            data_cfg.get("val_split", "test"), img_size=img_size,
+        )
+        class_names = VOC_CLASSES
     loader = DataLoader(
         dataset, batch_size=int(data_cfg.get("batch_size", 16)), shuffle=True,
+        num_workers=int(data_cfg.get("workers", 0)), collate_fn=collate_fn,
+        drop_last=False,
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=int(data_cfg.get("batch_size", 16)), shuffle=False,
         num_workers=int(data_cfg.get("workers", 0)), collate_fn=collate_fn,
         drop_last=False,
     )
@@ -118,7 +134,7 @@ def run_training(config: dict, *, epochs: int | None = None,
         raise ValueError("training loader has no batches")
 
     criterion = DetectionLoss(model)
-    base_lr = float(train_cfg.get("learning_rate", 1e-3))
+    base_lr = float(train_cfg.get("learning_rate", 2e-4))
     optimizer_name = str(train_cfg.get("optimizer", "adamw")).lower()
     optimizer_cls = torch.optim.AdamW if optimizer_name == "adamw" else torch.optim.SGD
     optimizer_kwargs = {"lr": base_lr,
@@ -133,6 +149,8 @@ def run_training(config: dict, *, epochs: int | None = None,
     log_path = output / "metrics.csv"
     start_epoch = 0
     best_loss = float("inf")
+    best_map50 = float("-inf")
+    best_val_loss = float("inf")
     best_epoch = 0
     if resume:
         checkpoint = torch.load(resume, map_location="cpu", weights_only=False)
@@ -140,6 +158,8 @@ def run_training(config: dict, *, epochs: int | None = None,
         optimizer.load_state_dict(checkpoint["optimizer"])
         start_epoch = int(checkpoint["epoch"])
         best_loss = float(checkpoint.get("best_loss", best_loss))
+        best_map50 = float(checkpoint.get("best_map50", best_map50))
+        best_val_loss = float(checkpoint.get("best_val_loss", best_val_loss))
         best_epoch = int(checkpoint.get("best_epoch", start_epoch))
         print(f"resumed {resume} at epoch {start_epoch}")
 
@@ -147,7 +167,17 @@ def run_training(config: dict, *, epochs: int | None = None,
     with log_path.open("a" if resume else "w", newline="", encoding="utf-8") as csv_file:
         log = csv.writer(csv_file)
         if write_header:
-            log.writerow(["epoch", "lr", "loss", "box", "cls", "dfl", "foreground"])
+            class_columns = [column for name in class_names
+                             for column in (f"{name}/gt", f"{name}/precision",
+                                            f"{name}/recall", f"{name}/f1",
+                                            f"{name}/ap50")]
+            log.writerow(["epoch", "lr", "train_loss", "train_box", "train_cls",
+                          "train_dfl", "train_foreground", "val_loss", "val_box",
+                          "val_cls", "val_dfl",
+                          "val_foreground",
+                          "precision_macro", "recall_macro", "f1_macro",
+                          "precision_micro", "recall_micro", "f1_micro", "map50",
+                          *class_columns])
         for epoch in range(start_epoch, epochs):
             model.train()
             sums = np.zeros(5, dtype=np.float64)
@@ -173,24 +203,58 @@ def run_training(config: dict, *, epochs: int | None = None,
 
             means = sums / steps_per_epoch
             epoch_loss = float(means[0])
-            improved = epoch_loss < best_loss
+            best_loss = min(best_loss, epoch_loss)
+            validation = evaluate_detector(
+                model, val_loader, num_classes=int(model_nc), class_names=class_names,
+                criterion=criterion,
+            )
+            val_loss = validation["val_loss"]
+            map50 = validation["map50"]
+            improved = (map50 > best_map50 + 1e-12 or
+                        (abs(map50 - best_map50) <= 1e-12 and
+                         val_loss["loss"] < best_val_loss))
             if improved:
-                best_loss = epoch_loss
+                best_map50 = map50
+                best_val_loss = val_loss["loss"]
                 best_epoch = epoch + 1
-            log.writerow([epoch + 1, lr, *means[:4], means[4]])
+            class_values = [
+                field
+                for value in validation["per_class"].values()
+                for field in (
+                    value["ground_truth"],
+                    *(value[metric] if value[metric] is not None else "n/a"
+                      for metric in ("precision", "recall", "f1", "ap50")),
+                )
+            ]
+            log.writerow([
+                epoch + 1, lr, *means[:4], means[4],
+                val_loss["loss"], val_loss["box"], val_loss["cls"], val_loss["dfl"],
+                val_loss["foreground"],
+                validation["precision"], validation["recall"], validation["f1"],
+                validation["micro_precision"], validation["micro_recall"],
+                validation["micro_f1"], map50, *class_values,
+            ])
             csv_file.flush()
             state = {"epoch": epoch + 1, "model": model.state_dict(),
                      "optimizer": optimizer.state_dict(), "best_loss": best_loss,
+                     "best_map50": best_map50, "best_val_loss": best_val_loss,
                      "best_epoch": best_epoch,
                      "config": config}
             torch.save(state, output / "last.pt")
             if improved or not (output / "best.pt").exists():
                 torch.save(state, output / "best.pt")
-            print(f"epoch {epoch + 1}/{epochs} loss={epoch_loss:.4f} "
-                  f"box={means[1]:.4f} cls={means[2]:.4f} dfl={means[3]:.4f} "
-                  f"lr={lr:.2e}", flush=True)
+            print(
+                f"epoch {epoch + 1}/{epochs} lr={lr:.2e} "
+                f"train_loss={epoch_loss:.4f} train_box={means[1]:.4f} "
+                f"train_cls={means[2]:.4f} train_dfl={means[3]:.4f} "
+                f"val_loss={val_loss['loss']:.4f} val_box={val_loss['box']:.4f} "
+                f"val_cls={val_loss['cls']:.4f} val_dfl={val_loss['dfl']:.4f} "
+                f"val_fg={val_loss['foreground']:.1f} "
+                f"P={validation['precision']:.3f} R={validation['recall']:.3f} "
+                f"F1={validation['f1']:.3f} mAP50={map50:.3f}", flush=True
+            )
             if patience is not None and patience > 0 and epoch + 1 - best_epoch >= patience:
-                print(f"early stop: no training-loss improvement for {patience} epochs",
+                print(f"early stop: no validation mAP@0.5 improvement for {patience} epochs",
                       flush=True)
                 break
     return output
@@ -268,7 +332,7 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
                 batch: int = 16, patience: int = 50, workers: int = 0,
                 device: str = "cpu", project: str | Path = "runs/train",
                 name: str = "exp", resume: bool | str | Path = False,
-                optimizer: str = "AdamW", lr0: float = 1e-3,
+                optimizer: str = "AdamW", lr0: float = 2e-4,
                 weight_decay: float = 5e-4, warmup_epochs: float = 3,
                 mosaic: float = .5, hsv: bool = True, fliplr: float = .5,
                 pretrained: bool | str | Path = False, seed: int = 23,
@@ -276,8 +340,9 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
                 threads: int = 4) -> dict:
     """Train an existing CandyEye detector from Python.
 
-    `patience` monitors mean training loss until a validation metric is
-    implemented. Training is CPU-only in this release.
+    Each epoch reports train/validation losses and aggregate validation metrics;
+    per-class metrics are stored in the CSV. `patience` monitors validation
+    mAP@0.5. Training is CPU-only in this release.
     """
     if epochs <= 0 or imgsz <= 0 or imgsz % 32:
         raise ValueError("epochs must be positive and imgsz divisible by 32")

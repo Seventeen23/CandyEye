@@ -118,10 +118,10 @@ class Detect(nn.Module):
         )
         self.dfl = DFL(reg_max) if reg_max > 1 else nn.Identity()
 
-    def forward(self, x: list[torch.Tensor]):
+    def forward(self, x: list[torch.Tensor], decode: bool | None = None):
         for i in range(self.nl):
             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
-        if self.training:  # Phase 1 contract: raw maps for the loss
+        if decode is False or (decode is None and self.training):
             return x
         return self._inference(x)
 

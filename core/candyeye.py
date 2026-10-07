@@ -136,6 +136,7 @@ class CandyEye(nn.Module):
             raise ValueError(f"img_size must be divisible by 32, got {img_size}")
         self.stride = self._detect_stride(img_size)
         self.model[-1].stride = self.stride
+        self.model[-1].bias_init()
 
     def set_classes(self, nc: int):
         """Resize the detection class head, preserving all compatible weights."""
@@ -151,6 +152,7 @@ class CandyEye(nn.Module):
         new = Detect(nc=nc, reg_max=old.reg_max, ch=channels).to(
             device=old.stride.device, dtype=next(old.parameters()).dtype)
         new.stride = old.stride.clone()
+        new.bias_init()
         for attribute in ("type", "i", "f", "rep"):
             if hasattr(old, attribute):
                 setattr(new, attribute, getattr(old, attribute))
@@ -192,8 +194,8 @@ class CandyEye(nn.Module):
             return torch.ones(1)
         return torch.tensor([img_size / f.shape[-2] for f in feats])
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor | list[torch.Tensor]:
-        """Run the graph; returns the Detect training output (list of maps)."""
+    def forward(self, x: torch.Tensor, *, decode: bool | None = None) -> torch.Tensor | list[torch.Tensor]:
+        """Run the graph; ``decode=False`` returns raw maps even in eval mode."""
         y = []  # layer-output history, index == absolute layer index
         for m in self.model:
             f = m.f
@@ -201,7 +203,7 @@ class CandyEye(nn.Module):
                 xi = x if f == -1 else y[f]
             else:
                 xi = [x if j == -1 else y[j] for j in f]
-            x = m(xi)
+            x = m(xi, decode=decode) if isinstance(m, Detect) else m(xi)
             y.append(x)
         return x
 
@@ -210,7 +212,7 @@ class CandyEye(nn.Module):
               workers: int = 0, device: str = "cpu",
               project: str | Path = "runs/train", name: str = "exp",
               resume: bool | str | Path = False, optimizer: str = "AdamW",
-              lr0: float = 1e-3, weight_decay: float = 5e-4,
+              lr0: float = 2e-4, weight_decay: float = 5e-4,
               warmup_epochs: float = 3, mosaic: float = .5,
               hsv: bool = True, fliplr: float = .5,
               pretrained: bool | str | Path = False, seed: int = 23,

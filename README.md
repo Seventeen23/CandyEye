@@ -81,10 +81,46 @@ print(results["best"])
 ```
 
 This CPU-first trainer saves `best.pt`, `last.pt`, and `metrics.csv` in the
-run directory. Resume with `resume=True` or pass a checkpoint path. `imgsz`
-must be divisible by 32. `patience` stops after that many epochs without an
-improvement in training loss; validation-based early stopping and mAP reporting
-are still in progress.
+run directory. Each epoch reports train and validation total, box,
+classification, and DFL losses, plus aggregate precision, recall, F1, and
+mAP@0.5. Per-class precision, recall, F1, and AP@0.5 are stored in
+`metrics.csv` rather than printed every epoch. Precision/recall/F1 use confidence 0.25 and IoU 0.5; AP uses
+confidence 0.001 and IoU 0.5. `best.pt` is selected by validation mAP@0.5, and
+`patience` stops after that metric fails to improve. Resume with `resume=True`
+or pass a checkpoint path. `imgsz` must be divisible by 32. Detection
+“accuracy” is not a standard object-detection metric, so use precision, recall,
+F1, and AP/mAP to assess the model.
+
+### Run a trained model on an image or video
+
+Use the Python predictor with an image path or video path. It loads class names
+from the dataset YAML and saves annotated output under `runs/predict/` by
+default:
+
+```python
+from inference.predict import CandyEyePredictor
+
+predictor = CandyEyePredictor(
+    weights="runs/train/fruit_smoke_test/best.pt",
+    data="data/test_data/fruits.v5i.yolov11/data.yaml",
+    imgsz=128,
+)
+
+# Run one image
+image_result = predictor.predict(
+    "data/test_data/fruits.v5i.yolov11/test/images/15_jpg.rf.bdcbfdcabfa19ea0ca4b42a986bcb604.jpg",
+    conf=0.25,
+)
+print(image_result["output"])
+print(image_result["detections"])
+
+# Or run a video instead
+video_result = predictor.predict("/path/to/clip.mp4", conf=0.25)
+print(video_result["output"], video_result["frames"])
+```
+
+Pass `output="path/to/result.jpg"` (or an `.mp4` path for video) to choose a
+specific output file.
 
 For a function-style entry point:
 

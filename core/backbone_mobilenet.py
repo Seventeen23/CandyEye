@@ -39,12 +39,13 @@ class MobileNetV3SmallDetector(nn.Module):
 
         detect = Detect(nc=nc, ch=(64, 128, 256))
         detect.stride = torch.tensor([8., 16., 32.])
+        detect.bias_init()
         self.model = nn.ModuleList([detect])
         self.nc = nc
         self.img_size = img_size
         self.register_buffer("stride", torch.tensor([8., 16., 32.]))
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, *, decode: bool | None = None):
         p3 = p4 = None
         for i, layer in enumerate(self.backbone):
             x = layer(x)
@@ -62,4 +63,4 @@ class MobileNetV3SmallDetector(nn.Module):
                                                     mode="nearest"), p3), 1))
         p4_out = self.pan4(torch.cat((self.down4(p3_out), p4_td), 1))
         p5_out = self.pan5(torch.cat((self.down5(p4_out), p5), 1))
-        return self.model[-1]([p3_out, p4_out, p5_out])
+        return self.model[-1]([p3_out, p4_out, p5_out], decode=decode)
