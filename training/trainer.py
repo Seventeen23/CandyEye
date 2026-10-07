@@ -280,6 +280,15 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
         raise ValueError("optimizer must be 'AdamW' or 'SGD'")
 
     data_cfg = _resolve_data(data)
+    data_nc = int(data_cfg.get("nc", 0) or 0)
+    if data_nc:
+        model_nc = int(getattr(model, "nc", model.model[-1].nc))
+        if data_nc != model_nc:
+            if not hasattr(model, "set_classes"):
+                raise ValueError(
+                    f"model has nc={model_nc}, but dataset YAML declares nc={data_nc}"
+                )
+            model.set_classes(data_nc)
     data_cfg.update({"batch_size": batch, "workers": workers,
                      "mosaic_probability": mosaic})
     cfg_name = str(getattr(model, "yaml", "configs/yolo11.yaml"))

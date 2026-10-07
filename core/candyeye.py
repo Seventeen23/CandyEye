@@ -129,12 +129,39 @@ class CandyEye(nn.Module):
         if nc is not None:
             data["nc"] = nc
         self.model = parse_model(data)
+        self.nc = self.model[-1].nc
         self.yaml = cfg
         self.img_size = img_size
         if img_size % 32:
             raise ValueError(f"img_size must be divisible by 32, got {img_size}")
         self.stride = self._detect_stride(img_size)
         self.model[-1].stride = self.stride
+
+    def set_classes(self, nc: int):
+        """Resize the detection class head, preserving all compatible weights."""
+        nc = int(nc)
+        if nc <= 0:
+            raise ValueError(f"nc must be positive, got {nc}")
+        old = self.model[-1]
+        if nc == old.nc:
+            self.nc = nc
+            return self
+
+        channels = tuple(branch[0].conv.in_channels for branch in old.cv2)
+        new = Detect(nc=nc, reg_max=old.reg_max, ch=channels).to(
+            device=old.stride.device, dtype=next(old.parameters()).dtype)
+        new.stride = old.stride.clone()
+        for attribute in ("type", "i", "f", "rep"):
+            if hasattr(old, attribute):
+                setattr(new, attribute, getattr(old, attribute))
+        old_state, new_state = old.state_dict(), new.state_dict()
+        with torch.no_grad():
+            for key, value in new_state.items():
+                if key in old_state and old_state[key].shape == value.shape:
+                    value.copy_(old_state[key])
+        self.model[-1] = new
+        self.nc = nc
+        return self
 
     @staticmethod
     def _load_yaml(cfg: str) -> dict:

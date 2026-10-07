@@ -111,20 +111,14 @@ names: [cat, dog]
 
 Each image needs a same-stem label file under the matching `labels/` folder;
 each nonempty row is `class_id center_x center_y width height`, normalized to
-the image dimensions. Set CandyEye's class count from the dataset YAML:
+the image dimensions. Pass the YAML path directly; CandyEye reads `nc` (or
+counts `names`) and configures its class head automatically:
 
 ```python
-import yaml
 from core import CandyEye
 
 data_yaml = "/datasets/my-export/data.yaml"
-with open(data_yaml, encoding="utf-8") as f:
-    dataset = yaml.safe_load(f)
-nc = dataset.get("nc")
-if nc is None:
-    nc = len(dataset["names"])
-
-model = CandyEye("configs/yolo11.yaml", nc=nc)
+model = CandyEye("configs/yolo11.yaml")
 results = model.train(data=data_yaml, epochs=100, imgsz=128,
                       batch=16, patience=20)
 ```

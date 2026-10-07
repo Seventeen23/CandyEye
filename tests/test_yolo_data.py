@@ -2,9 +2,12 @@
 import cv2
 import numpy as np
 import pytest
+import torch
 from data.yolo import YoloTxtDataset
 from data.voc import collate_fn
 from training.trainer import _resolve_data
+from core import CandyEye
+import training.trainer as trainer
 
 
 def _write_image_and_label(root, name="sample"):
@@ -52,3 +55,23 @@ def test_yolo_txt_rejects_class_outside_dataset_range(tmp_path):
     ds = YoloTxtDataset(tmp_path / "train" / "images", num_classes=1)
     with pytest.raises(ValueError, match="outside configured range"):
         ds[0]
+
+
+def test_train_reads_yaml_and_resizes_class_head_automatically(tmp_path, monkeypatch):
+    yaml_path = tmp_path / "dataset.yaml"
+    yaml_path.write_text(
+        "train: train/images\nvalid: valid/images\nnc: 2\nnames: [cat, dog]\n",
+        encoding="utf-8",
+    )
+    model = CandyEye("configs/yolo11.yaml", img_size=64)
+    assert model.nc == 20
+
+    monkeypatch.setattr(trainer, "run_training", lambda _config, **kwargs: tmp_path / "run")
+    results = trainer.train_model(
+        model, data=yaml_path, epochs=1, imgsz=64, project=tmp_path, name="run"
+    )
+
+    assert model.nc == 2
+    assert model.model[-1].nc == 2
+    assert [feature.shape[1] for feature in model(torch.zeros(1, 3, 64, 64))] == [66] * 3
+    assert results["best"] == tmp_path / "run" / "best.pt"
