@@ -123,3 +123,32 @@ simultaneously over shared conv features — no mask branch, boxes only).
 - Input-size sweep (96 / 160 / 192 / 320)
 - INT8 static quantization with calibration set
 - Instance segmentation heads (YOLACT-style prototype masks), revisit if needed
+
+### Proposed research direction: molecular-inspired adaptive scale exchange
+
+**Status:** hypothesis only; not implemented and not a novelty claim.
+
+The fructose/glucose analogy can motivate a design principle: local interactions
+between feature scales should combine into a useful global representation. Treat
+P3/P4/P5 as interacting feature groups. Let neighboring scales exchange
+lightweight depthwise/pointwise feature messages, with learned gates controlling
+how much information is passed. Keep the existing YOLO-style backbone option,
+decoupled detection head, loss, and training workflow so the new neck remains an
+optional experiment rather than a setup-breaking fork.
+
+The molecular idea is a metaphor for adaptive local interaction, not a physical
+simulation. Cross-scale fusion and gating are established research directions;
+review related work before making any originality claim.
+
+**Testable hypothesis:** adaptive cross-scale exchange improves validation
+detection quality, especially for small objects, at an acceptable increase in
+CPU latency and model size compared with the current fixed-fusion neck.
+
+**Suggested experiment:** expose the neck as a config choice while keeping the
+current neck as the default. Compare (1) the current neck, (2) the proposed
+exchange without gates, and (3) the gated exchange. Keep data splits, image size,
+training schedule, and seeds consistent; use a validation split from training
+data for model selection and reserve the test split for final results. Report
+mAP@0.5 and mAP@0.5:0.95, with small-object results where available, parameter
+count, compute, CPU inference latency, and time to train. Repeat promising
+comparisons across multiple seeds before drawing conclusions.
