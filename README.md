@@ -95,6 +95,40 @@ results = train(model="configs/yolo11.yaml", data="configs/default.yaml",
                 epochs=100, imgsz=128, batch=16, patience=20)
 ```
 
+### Roboflow YOLO detection export
+
+CandyEye accepts the common Roboflow image-folder and normalized `.txt` label
+export. Its `data.yaml` can look like this (paths may be relative to the YAML):
+
+```yaml
+path: /datasets/my-export
+train: train/images
+valid: valid/images
+test: test/images
+nc: 2
+names: [cat, dog]
+```
+
+Each image needs a same-stem label file under the matching `labels/` folder;
+each nonempty row is `class_id center_x center_y width height`, normalized to
+the image dimensions. Set CandyEye's class count from the dataset YAML:
+
+```python
+import yaml
+from core import CandyEye
+
+data_yaml = "/datasets/my-export/data.yaml"
+with open(data_yaml, encoding="utf-8") as f:
+    dataset = yaml.safe_load(f)
+nc = dataset.get("nc")
+if nc is None:
+    nc = len(dataset["names"])
+
+model = CandyEye("configs/yolo11.yaml", nc=nc)
+results = model.train(data=data_yaml, epochs=100, imgsz=128,
+                      batch=16, patience=20)
+```
+
 See [ROADMAP.md](ROADMAP.md) for current evaluation and export work.
 
 > **Note:** package installation currently doesn't expose the modules outside

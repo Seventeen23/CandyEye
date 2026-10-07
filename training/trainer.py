@@ -16,6 +16,7 @@ from core.backbone_mobilenet import MobileNetV3SmallDetector
 from core.convert_yolo11 import load_official_state_dict, load_weights
 from core import CandyEye
 from data.transforms import Compose, HSVJitter, RandomHorizontalFlip
+from data.yolo import YoloTxtDataset
 from data.voc import VOCDataset, collate_fn
 from training.loss import DetectionLoss
 
@@ -81,15 +82,32 @@ def run_training(config: dict, *, epochs: int | None = None,
     seed_everything(int(train_cfg.get("seed", 23)))
     torch.set_num_threads(threads)
     device = torch.device("cpu")
+    model = (model or build_experiment_model(
+        config, no_pretrained=no_pretrained)).to(device)
 
     augment = Compose(train_cfg.get(
         "api_transforms", [HSVJitter(), RandomHorizontalFlip()]))
-    dataset = VOCDataset(
-        data_cfg.get("root", "data/VOCdevkit"),
-        data_cfg.get("train_split", "trainval"), transform=augment,
-        img_size=model_cfg.get("img_size", 128),
-        mosaic_probability=float(data_cfg.get("mosaic_probability", 0.0)),
-    )
+    img_size = int(model_cfg.get("img_size", 128))
+    mosaic_probability = float(data_cfg.get("mosaic_probability", 0.0))
+    if data_cfg.get("format") == "yolo_txt":
+        model_nc = int(getattr(model, "nc", model.model[-1].nc))
+        data_nc = int(data_cfg.get("nc", 0))
+        if data_nc and data_nc != model_nc:
+            raise ValueError(
+                f"model has nc={model_nc}, but dataset YAML declares nc={data_nc}; "
+                "construct CandyEye with matching nc"
+            )
+        dataset = YoloTxtDataset(
+            data_cfg["train_images"], img_size=img_size, transform=augment,
+            mosaic_probability=mosaic_probability,
+            num_classes=data_cfg.get("nc") or None,
+        )
+    else:
+        dataset = VOCDataset(
+            data_cfg.get("root", "data/VOCdevkit"),
+            data_cfg.get("train_split", "trainval"), transform=augment,
+            img_size=img_size, mosaic_probability=mosaic_probability,
+        )
     loader = DataLoader(
         dataset, batch_size=int(data_cfg.get("batch_size", 16)), shuffle=True,
         num_workers=int(data_cfg.get("workers", 0)), collate_fn=collate_fn,
@@ -99,8 +117,6 @@ def run_training(config: dict, *, epochs: int | None = None,
     if steps_per_epoch <= 0:
         raise ValueError("training loader has no batches")
 
-    model = (model or build_experiment_model(
-        config, no_pretrained=no_pretrained)).to(device)
     criterion = DetectionLoss(model)
     base_lr = float(train_cfg.get("learning_rate", 1e-3))
     optimizer_name = str(train_cfg.get("optimizer", "adamw")).lower()
@@ -181,12 +197,14 @@ def run_training(config: dict, *, epochs: int | None = None,
 
 
 def _resolve_data(data) -> dict:
-    """Read the project dataset YAML or accept a VOC root/dict directly."""
+    """Read the project VOC YAML or a Roboflow YOLO-format dataset YAML."""
+    yaml_dir = Path.cwd()
     if isinstance(data, (str, Path)):
         path = Path(data)
         if path.is_dir():
             raw = {"root": str(path)}
         else:
+            yaml_dir = path.resolve().parent
             with path.open(encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
     elif isinstance(data, dict):
@@ -194,6 +212,32 @@ def _resolve_data(data) -> dict:
     else:
         raise TypeError("data must be a dataset YAML, VOC root path, or mapping")
     section = raw.get("data", raw)
+    if "train" in section and ("val" in section or "valid" in section):
+        data_root = Path(section.get("path", yaml_dir))
+        if not data_root.is_absolute():
+            data_root = (yaml_dir / data_root).resolve()
+
+        def resolve_source(value):
+            if isinstance(value, (list, tuple)):
+                return [str((data_root / p).resolve()) if not Path(p).is_absolute()
+                        else str(Path(p)) for p in value]
+            value_path = Path(value)
+            return str(value_path if value_path.is_absolute()
+                       else (data_root / value_path).resolve())
+
+        names = section.get("names", raw.get("names"))
+        if isinstance(names, dict):
+            names = [names[k] for k in sorted(names, key=lambda x: int(x))]
+        nc = int(section.get("nc", raw.get("nc", len(names) if names else 0)))
+        if names and nc != len(names):
+            raise ValueError(f"dataset YAML declares nc={nc} but has {len(names)} names")
+        val_source = section.get("val", section.get("valid"))
+        return {"format": "yolo_txt", "train_images": resolve_source(section["train"]),
+                "val_images": resolve_source(val_source),
+                "test_images": resolve_source(section["test"]) if section.get("test") else None,
+                "nc": nc, "names": names, "root": str(data_root),
+                "mosaic_probability": 0.0}
+
     root = section.get("root", section.get("path", "data/VOCdevkit"))
     train_split = section.get("train_split", "trainval")
     val_split = section.get("val_split", "test")

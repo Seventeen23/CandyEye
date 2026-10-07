@@ -56,6 +56,7 @@ simultaneously over shared conv features — no mask branch, boxes only).
 
 - [x] Letterbox + resize transforms (raw xyxy → normalized cxcywh after)
 - [x] Mosaic, HSV jitter, horizontal flip
+- [x] Roboflow YOLO detection export reader (image folders + normalized labels)
 - [x] Collate (image stack + `(img_idx, cls, cx, cy, w, h)` targets)
 - [x] Batch visualization with GT boxes
 

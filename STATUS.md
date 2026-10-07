@@ -163,6 +163,7 @@ Detect(nc=80)=464,912 matches the official model exactly.
 - [x] `data/transforms.py` — square letterbox with xyxy box remap, HSV jitter,
   horizontal flip, and composable transforms
 - [x] `VOCDataset` — fixed-size samples and optional four-image mosaic
+- [x] `YoloTxtDataset` — Roboflow YOLO detection folders and normalized labels
 - [x] `collate_fn` — normalized BCHW float images and detector `(batch_idx, cls,
   cx, cy, w, h)` targets
 - [x] `scripts/visualize_batch.py` — training batch and GT overlay saved to
@@ -200,7 +201,7 @@ Detect(nc=80)=464,912 matches the official model exactly.
   checkpoints/logs written
 - [x] Resume smoke: scratch run resumed at epoch 2 and finished epoch 3
 - [x] Trainer API dispatch test; one real one-batch API run completed
-- [x] Full suite: **22 tests passed**
+- [x] Full suite after Roboflow dataset support: **25 tests passed**
 - [ ] Full 100-epoch runs (CPU jobs estimated to take hours; MobileNet also
   requires its ImageNet weights download)
 
