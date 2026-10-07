@@ -4,6 +4,7 @@ venv/
 __pycache__/
 SPECS.md
 data/downloads/
+data/test_data/
 data/VOCdevkit/
 *.egg-info/
 runs/

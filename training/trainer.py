@@ -222,8 +222,18 @@ def _resolve_data(data) -> dict:
                 return [str((data_root / p).resolve()) if not Path(p).is_absolute()
                         else str(Path(p)) for p in value]
             value_path = Path(value)
-            return str(value_path if value_path.is_absolute()
-                       else (data_root / value_path).resolve())
+            if value_path.is_absolute():
+                return str(value_path)
+            resolved = (data_root / value_path).resolve()
+            if not resolved.exists():
+                # Some exported YAMLs retain ../ split paths after data.yaml
+                # has been placed alongside train/valid/test in its dataset.
+                local_split = Path(*(part for part in value_path.parts
+                                      if part not in ("..", ".")))
+                local_resolved = (yaml_dir / local_split).resolve()
+                if local_resolved.exists():
+                    resolved = local_resolved
+            return str(resolved)
 
         names = section.get("names", raw.get("names"))
         if isinstance(names, dict):
