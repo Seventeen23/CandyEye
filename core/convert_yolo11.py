@@ -1,4 +1,4 @@
-"""Load the official YOLO11n weights (nc=80) into our YOLO model.
+"""Load the official YOLO11n weights (nc=80) into our model.
 
 Reads the *clean* state_dict produced by ``scripts/bootstrap_weights.py``
 (``weights/yolo11n.pth``, plain tensors only — no ultralytics dependency).
@@ -17,11 +17,10 @@ Two load scenarios:
 from __future__ import annotations
 
 import torch
-
 import onnx
 
 WEIGHTS = "weights/yolo11n.pth"
-ONNX_PATH = "/tmp/opencode/yolo11n.onnx"  # official fp32 export (BN fused)
+ONNX_PATH = "tmp/yolo11n.onnx"  # official fp32 export (BN fused)
 
 # The official checkpoint was trained with nc=80 (COCO), our training model
 # uses nc=20 (VOC).  In Detect, c3 = max(ch[0], min(nc, 100)) pins the class
