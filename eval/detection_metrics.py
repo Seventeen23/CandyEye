@@ -11,7 +11,7 @@ from eval.map import box_iou_xyxy, evaluate_map50
 def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
                       conf_threshold: float = 0.25, ap_conf_threshold: float = 0.001,
                       iou_threshold: float = 0.5, max_detections: int = 300,
-                      criterion=None) -> dict:
+                      criterion=None, include_confusion_matrix: bool = False) -> dict:
     """Evaluate a detector and report per-class/macro/micro metrics.
 
     Precision, recall, and F1 use ``conf_threshold``. AP uses detections above
@@ -25,6 +25,9 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
 
     ground_truth = {}
     detections = []
+    background_id = num_classes
+    confusion_matrix = (np.zeros((num_classes + 1, num_classes + 1), dtype=np.int64)
+                        if include_confusion_matrix else None)
     val_loss_sums = {"loss": 0.0, "box": 0.0, "cls": 0.0,
                      "dfl": 0.0, "foreground": 0.0}
     val_batches = 0
@@ -69,6 +72,9 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
                     keep = class_scores >= ap_conf_threshold
                     boxes, class_scores, class_ids = boxes[keep], class_scores[keep], class_ids[keep]
                     if boxes.numel() == 0:
+                        if confusion_matrix is not None:
+                            for class_id in gt_labels:
+                                confusion_matrix[int(class_id), background_id] += 1
                         continue
                     cx, cy, width, height = boxes.unbind(1)
                     xyxy = torch.stack((cx - width / 2, cy - height / 2,
@@ -78,13 +84,42 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
                     keep_indices = batched_nms(
                         xyxy, class_scores, class_ids, iou_threshold
                     )[:max_detections]
+                    image_detections = []
                     for index in keep_indices.tolist():
-                        detections.append({
+                        detection = {
                             "image_id": image_id,
                             "class_id": int(class_ids[index]),
                             "score": float(class_scores[index]),
                             "box": xyxy[index].cpu().numpy(),
-                        })
+                        }
+                        detections.append(detection)
+                        if confusion_matrix is not None and detection["score"] >= conf_threshold:
+                            image_detections.append(detection)
+
+                    # Match detections to ground truth by IoU, regardless of
+                    # class, so a wrong class is shown as an off-diagonal cell.
+                    if confusion_matrix is not None:
+                        pairs = []
+                        for det_index, detection in enumerate(image_detections):
+                            ious = box_iou_xyxy(detection["box"], gt_boxes)
+                            pairs.extend((float(iou), det_index, gt_index)
+                                         for gt_index, iou in enumerate(ious)
+                                         if iou >= iou_threshold)
+                        pairs.sort(reverse=True)
+                        matched_detections, matched_targets = set(), set()
+                        for _, det_index, gt_index in pairs:
+                            if det_index in matched_detections or gt_index in matched_targets:
+                                continue
+                            detection = image_detections[det_index]
+                            confusion_matrix[int(gt_labels[gt_index]), detection["class_id"]] += 1
+                            matched_detections.add(det_index)
+                            matched_targets.add(gt_index)
+                        for gt_index, class_id in enumerate(gt_labels):
+                            if gt_index not in matched_targets:
+                                confusion_matrix[int(class_id), background_id] += 1
+                        for det_index, detection in enumerate(image_detections):
+                            if det_index not in matched_detections:
+                                confusion_matrix[background_id, detection["class_id"]] += 1
     finally:
         model.train(was_training)
 
@@ -153,6 +188,9 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
         "micro_precision": micro_precision, "micro_recall": micro_recall,
         "micro_f1": micro_f1,
         "per_class": per_class,
+        "confusion_matrix": confusion_matrix,
+        "confusion_matrix_labels": ([*class_names, "background"]
+                                    if confusion_matrix is not None else None),
         "confidence_threshold": conf_threshold,
         "iou_threshold": iou_threshold,
         "val_loss": ({key: value / val_batches for key, value in val_loss_sums.items()}

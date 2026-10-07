@@ -51,7 +51,7 @@ initialized:
 python3 -m venv venv
 source venv/bin/activate
 pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-pip install onnx onnxruntime opencv-python-headless pyyaml tqdm pillow pytest
+pip install onnx onnxruntime opencv-python-headless pyyaml tqdm pillow matplotlib pytest
 pip install -e .
 
 # PASCAL VOC 2007 (~870 MB download, ~2 GB extracted)
@@ -90,6 +90,14 @@ confidence 0.001 and IoU 0.5. `best.pt` is selected by validation mAP@0.5, and
 or pass a checkpoint path. `imgsz` must be divisible by 32. Detection
 “accuracy” is not a standard object-detection metric, so use precision, recall,
 F1, and AP/mAP to assess the model.
+
+The console prints a compact summary for each epoch. At the end of training,
+the run directory also contains `results.png` (total/component losses,
+validation metrics, and
+learning-rate curves), `confusion_matrix.png` (for the best checkpoint at
+confidence 0.25 and IoU 0.5), and `confusion_matrix.csv`. The matrix includes a
+background row and column to show false positives and missed objects. The CSV
+history remains available as `metrics.csv`.
 
 ### Run a trained model on an image or video
 

@@ -5,6 +5,7 @@ import argparse
 import csv
 import math
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,99 @@ from data.yolo import YoloTxtDataset
 from data.voc import VOC_CLASSES, VOCDataset, collate_fn
 from eval.detection_metrics import evaluate_detector
 from training.loss import DetectionLoss
+
+
+def _save_training_plots(metrics_path: Path, output: Path) -> Path | None:
+    """Save loss, validation metric, and learning-rate histories as a PNG."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("Plots skipped: install matplotlib to generate results.png", flush=True)
+        return None
+
+    with metrics_path.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    if not rows:
+        return None
+    epochs = [int(row["epoch"]) for row in rows]
+    fig, axes = plt.subplots(4, 1, figsize=(11, 15), sharex=True)
+
+    axes[0].plot(epochs, [float(row["train_loss"]) for row in rows], label="Train")
+    axes[0].plot(epochs, [float(row["val_loss"]) for row in rows], label="Validation")
+    axes[0].set_title("Total loss")
+    axes[0].set_ylabel("Loss")
+    axes[0].legend()
+
+    for key, label, color in (("box", "Box", "tab:blue"),
+                              ("cls", "Class", "tab:orange"),
+                              ("dfl", "DFL", "tab:green")):
+        axes[1].plot(epochs, [float(row[f"train_{key}"]) for row in rows],
+                     color=color, label=f"Train {label}")
+        axes[1].plot(epochs, [float(row[f"val_{key}"]) for row in rows],
+                     color=color, linestyle="--", label=f"Val {label}")
+    axes[1].set_title("Loss components (solid: train, dashed: validation)")
+    axes[1].set_ylabel("Loss")
+    axes[1].legend(ncol=3)
+
+    for key, label in (("precision_macro", "Precision"),
+                       ("recall_macro", "Recall"),
+                       ("f1_macro", "F1"), ("map50", "mAP50")):
+        axes[2].plot(epochs, [float(row[key]) for row in rows], label=label)
+    axes[2].set_title("Validation performance")
+    axes[2].set_ylabel("Score")
+    axes[2].set_ylim(0, 1.02)
+    axes[2].legend(ncol=4)
+
+    axes[3].plot(epochs, [float(row["lr"]) for row in rows], label="Learning rate")
+    axes[3].set_title("Learning rate")
+    axes[3].set_ylabel("LR")
+    axes[3].set_xlabel("Epoch")
+    axes[3].legend()
+    for axis in axes:
+        axis.grid(True, alpha=0.25)
+    fig.tight_layout()
+    path = output / "results.png"
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return path
+
+
+def _save_confusion_matrix(matrix: np.ndarray, labels: list[str], output: Path):
+    """Save raw confusion-matrix counts in CSV and, when available, PNG form."""
+    csv_path = output / "confusion_matrix.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["true/predicted", *labels])
+        writer.writerows([label, *row.tolist()] for label, row in zip(labels, matrix))
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("Confusion-matrix image skipped: install matplotlib", flush=True)
+        return csv_path, None
+
+    width = max(9, min(18, len(labels) * 0.8))
+    fig, axis = plt.subplots(figsize=(width, width * 0.82))
+    image = axis.imshow(matrix, cmap="Blues", interpolation="nearest")
+    fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
+    axis.set(xticks=np.arange(len(labels)), yticks=np.arange(len(labels)),
+             xticklabels=labels, yticklabels=labels,
+             xlabel="Predicted class", ylabel="True class",
+             title="Validation confusion matrix (best checkpoint)")
+    plt.setp(axis.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    cutoff = matrix.max() / 2 if matrix.size and matrix.max() else 0
+    for row in range(matrix.shape[0]):
+        for col in range(matrix.shape[1]):
+            axis.text(col, row, str(int(matrix[row, col])), ha="center", va="center",
+                      color="white" if matrix[row, col] > cutoff else "black", fontsize=8)
+    fig.tight_layout()
+    png_path = output / "confusion_matrix.png"
+    fig.savefig(png_path, dpi=160)
+    plt.close(fig)
+    return csv_path, png_path
 
 
 def lr_factor(progress: float, epochs: int, warmup_epochs: float = 3.0,
@@ -179,6 +273,7 @@ def run_training(config: dict, *, epochs: int | None = None,
                           "precision_micro", "recall_micro", "f1_micro", "map50",
                           *class_columns])
         for epoch in range(start_epoch, epochs):
+            epoch_started = time.perf_counter()
             model.train()
             sums = np.zeros(5, dtype=np.float64)
             for step, batch in enumerate(loader):
@@ -243,20 +338,42 @@ def run_training(config: dict, *, epochs: int | None = None,
             torch.save(state, output / "last.pt")
             if improved or not (output / "best.pt").exists():
                 torch.save(state, output / "best.pt")
+            elapsed = time.perf_counter() - epoch_started
+            marker = "  best" if improved else ""
             print(
-                f"epoch {epoch + 1}/{epochs} lr={lr:.2e} "
-                f"train_loss={epoch_loss:.4f} train_box={means[1]:.4f} "
-                f"train_cls={means[2]:.4f} train_dfl={means[3]:.4f} "
-                f"val_loss={val_loss['loss']:.4f} val_box={val_loss['box']:.4f} "
-                f"val_cls={val_loss['cls']:.4f} val_dfl={val_loss['dfl']:.4f} "
-                f"val_fg={val_loss['foreground']:.1f} "
-                f"P={validation['precision']:.3f} R={validation['recall']:.3f} "
-                f"F1={validation['f1']:.3f} mAP50={map50:.3f}", flush=True
+                f"\nEpoch {epoch + 1:03d}/{epochs:03d}  "
+                f"{elapsed:5.1f}s  lr {lr:.2e}{marker}\n"
+                f"  Train  loss {epoch_loss:.4f} | box {means[1]:.4f}  "
+                f"cls {means[2]:.4f}  dfl {means[3]:.4f}\n"
+                f"  Val    loss {val_loss['loss']:.4f} | box {val_loss['box']:.4f}  "
+                f"cls {val_loss['cls']:.4f}  dfl {val_loss['dfl']:.4f}\n"
+                f"  Scores P {validation['precision']:.3f}  "
+                f"R {validation['recall']:.3f}  F1 {validation['f1']:.3f}  "
+                f"mAP50 {map50:.3f}", flush=True
             )
             if patience is not None and patience > 0 and epoch + 1 - best_epoch >= patience:
                 print(f"early stop: no validation mAP@0.5 improvement for {patience} epochs",
                       flush=True)
                 break
+    best_checkpoint = output / "best.pt"
+    if best_checkpoint.exists():
+        best_state = torch.load(best_checkpoint, map_location=device, weights_only=False)
+        model.load_state_dict(best_state["model"])
+        best_validation = evaluate_detector(
+            model, val_loader, num_classes=int(model_nc), class_names=class_names,
+            conf_threshold=0.25, criterion=None, include_confusion_matrix=True,
+        )
+        matrix_csv, matrix_png = _save_confusion_matrix(
+            best_validation["confusion_matrix"],
+            best_validation["confusion_matrix_labels"], output,
+        )
+        plot_path = _save_training_plots(log_path, output)
+        print("\nTraining complete")
+        print(f"  Best checkpoint: {best_checkpoint} (epoch {best_state['epoch']})")
+        if plot_path:
+            print(f"  Training graphs: {plot_path}")
+        print(f"  Confusion matrix: {matrix_png or matrix_csv}")
+        print(f"  Epoch history: {log_path}", flush=True)
     return output
 
 
@@ -418,7 +535,10 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
                               resume=str(resume_path) if resume_path else None,
                               threads=threads, model=model, patience=patience)
     return {"save_dir": result_dir, "best": result_dir / "best.pt",
-            "last": result_dir / "last.pt", "results": result_dir / "metrics.csv"}
+            "last": result_dir / "last.pt", "results": result_dir / "metrics.csv",
+            "plots": result_dir / "results.png",
+            "confusion_matrix": result_dir / "confusion_matrix.png",
+            "confusion_matrix_csv": result_dir / "confusion_matrix.csv"}
 
 
 def train(model: str | Path | dict = "configs/yolo11.yaml", *, data,
