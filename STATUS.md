@@ -97,7 +97,7 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 - [x] `core/modules/blocks.py` — Bottleneck/C3k/C3k2/SPPF/Attention/PSABlock/C2PSA (param-exact, verified)
 - [x] `core/modules/detect.py` — DFL + Detect (parallel box/class branches, param-exact)
 - [x] `configs/yolo11.yaml` — architecture transcription, nc=20, scale `n`
-- [x] `core/yolo.py` — YAML parser/builder + forward graph (stride fill, imgsz guard)
+- [x] `core/candyeye.py` — YAML parser/builder + forward graph (stride fill, imgsz guard)
 - [x] `tests/test_model.py` — **5/5 pass** (`pytest tests/test_model.py -q`)
 
 ### Phase 1 acceptance
@@ -112,7 +112,7 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 | conv-weight keys vs official ONNX (model.2/10/23) | **pass** — only `*.bn.*` differ, and that's ONNX BN-fusion (official `.pt` keeps them) |
 | `imgsz` guard rejects 127 | **pass** |
 
-Bugs caught during build-out (all in `core/yolo.py`, now fixed):
+Bugs caught during build-out (all in `core/candyeye.py`, now fixed):
 1. `module.n = n` clobbered `SPPF.self.n` (pool count 3→1) and `C2PSA.n` →
    wrapped as `.rep`.
 2. `ch[i]` was layer-`i-1` output → absolute refs (`ch[16]`=192, `[13]`=256)
@@ -134,7 +134,7 @@ Bugs caught during build-out (all in `core/yolo.py`, now fixed):
 - [x] `scripts/bootstrap_weights.py` — dev-only ultralytics use; official `.pt` → clean `weights/yolo11n.pth` (499 tensors, fp16-source) + `runs/bus.jpg` / `runs/zidane.jpg`
 - [x] `core/convert_yolo11.py` — shape-checked loader `load_weights` (loaded/skipped/unexpected) + `EXPECTED_NC20_SKIPPED` (51 unfused) + `load_fused_from_onnx` + `EXPECTED_FUSED_NC20_SKIPPED` (24)
 - [x] `inference/predict.py` — letterbox → forward → DFL decode → torchvision NMS → cv2 draw
-- [x] `YOLO.fuse()` — BN folded into convs (state_dict then matches ONNX initializers 1:1)
+- [x] `CandyEye.fuse()` — BN folded into convs (state_dict then matches ONNX initializers 1:1)
 - [x] `tests/test_convert.py` — **10/10 pass** (`pytest tests/ -q`)
 
 ### Phase 2 acceptance
@@ -163,7 +163,7 @@ Detect(nc=80)=464,912 matches the official model exactly.
 - [x] `data/transforms.py` — square letterbox with xyxy box remap, HSV jitter,
   horizontal flip, and composable transforms
 - [x] `VOCDataset` — fixed-size samples and optional four-image mosaic
-- [x] `collate_fn` — normalized BCHW float images and YOLO `(batch_idx, cls,
+- [x] `collate_fn` — normalized BCHW float images and detector `(batch_idx, cls,
   cx, cy, w, h)` targets
 - [x] `scripts/visualize_batch.py` — training batch and GT overlay saved to
   `runs/batch.jpg`
@@ -191,13 +191,16 @@ Detect(nc=80)=464,912 matches the official model exactly.
 
 - [x] `training/trainer.py` — CPU AdamW training, 3-epoch warmup + cosine,
   CSV metrics, last/best checkpoints, and resume
+- [x] Public API: `CandyEye.train(data=..., epochs=..., imgsz=..., patience=...)`
+  plus `from core import train`
 - [x] `core/backbone_mobilenet.py` — MobileNetV3-Small feature adapter, FPN,
   and Detect head; optional torchvision ImageNet initialization
 - [x] Experiment configs for scratch, YOLO11n fine-tune, and MobileNetV3-Small
 - [x] Two-epoch smoke run for all three configs; all losses finite and
   checkpoints/logs written
 - [x] Resume smoke: scratch run resumed at epoch 2 and finished epoch 3
-- [x] Full suite: **19 tests passed**
+- [x] Trainer API dispatch test; one real one-batch API run completed
+- [x] Full suite: **22 tests passed**
 - [ ] Full 100-epoch runs (CPU jobs estimated to take hours; MobileNet also
   requires its ImageNet weights download)
 

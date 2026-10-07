@@ -36,7 +36,7 @@ simultaneously over shared conv features — no mask branch, boxes only).
 - [x] `core/modules/blocks.py` — Bottleneck, C3k, C3k2, SPPF, Attention, PSABlock, C2PSA
 - [x] `core/modules/detect.py` — DFL + Detect (parallel box/class branches)
 - [x] `configs/yolo11.yaml` — architecture transcription, nc=20, scale `n`
-- [x] `core/yolo.py` — YAML parser/builder + forward graph
+- [x] `core/candyeye.py` — YAML parser/builder + forward graph
 - [x] Shape tests: `1×3×128×128` → P3/P4/P5 correct channels, param count 2,593,740
 
 ## Phase 2 — Pretrained demo (Experiment A)
@@ -73,6 +73,7 @@ simultaneously over shared conv features — no mask branch, boxes only).
 **Goal:** all three configs train to completion on CPU.
 
 - [x] `training/trainer.py` — AdamW, 3-ep warmup + cosine, ckpt/resume, logs
+- [x] Public training API: `CandyEye.train(data=..., epochs=..., imgsz=..., ...)`
 - [x] `core/backbone_mobilenet.py` — MobileNetV3-Small adapter (Experiment B)
 - [x] Configs: `tiny_scratch`, `yolo11n_finetune`, `mobilenetv3_small`
 - [x] Smoke run: 2 epochs, finite losses, checkpoints and CSV logs

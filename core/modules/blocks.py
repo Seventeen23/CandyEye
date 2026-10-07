@@ -1,4 +1,4 @@
-"""Reusable YOLO-style blocks built on Conv.
+"""Reusable convolution, CSP, and attention blocks used by CandyEye.
 
 Bottleneck / C3k / C3k2       — CSP bottleneck stacks (the network body)
 SPPF                          — spatial pyramid pooling (fast)

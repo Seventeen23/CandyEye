@@ -1,4 +1,4 @@
-"""MobileNetV3-Small backbone with a YOLO-style FPN and Detect head."""
+"""MobileNetV3-Small backbone with a feature pyramid and detection head."""
 from __future__ import annotations
 
 import torch

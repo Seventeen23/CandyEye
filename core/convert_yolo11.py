@@ -7,8 +7,8 @@ and reported, everything else is copied 1:1 (parameters *and* buffers such as
 BatchNorm running statistics, so eval-mode inference is faithful).
 
 Two load scenarios:
-- ``YOLO(yaml, nc=80)``   — exact full load: 0 missing / 0 unexpected.
-- ``YOLO(yaml, nc=20)``   — our VOC training target: the whole class branch
+- ``CandyEye(yaml, nc=80)``   — exact full load: 0 missing / 0 unexpected.
+- ``CandyEye(yaml, nc=20)``   — our VOC training target: the whole class branch
   ``model.23.cv3.*`` is nc/c3-dependent, so exactly ``EXPECTED_NC20_SKIPPED``
   (51 tensors, generated below from the known structure) are skipped and stay
   random-initialised.  The box branch (``cv2`` + ``dfl``) still loads 1:1, so
@@ -118,7 +118,7 @@ def load_fused_from_onnx(path: str = ONNX_PATH) -> dict[str, torch.Tensor]:
     """Read the official ONNX graph initializers as a name -> fp32 Tensor dict.
 
     The graph's weights are BN-fused, so this only makes sense for a model
-    that has been ``YOLO(...).fuse()``d — the key set then matches 1:1
+    that has been ``CandyEye(...).fuse()``d — the key set then matches 1:1
     (``model.0.conv.weight`` + ``model.0.conv.bias``, no ``.bn.*``).
     """
     model = onnx.load(path)

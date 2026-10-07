@@ -21,7 +21,7 @@ import torch
 from torchvision.ops import batched_nms
 
 from core.convert_yolo11 import load_official_state_dict, load_weights
-from core.yolo import YOLO
+from core import CandyEye
 
 # ---------------------------------------------------------------------------
 # Class names.  nc=20 -> PASCAL VOC order; nc=80 -> COCO order (as in the
@@ -52,7 +52,7 @@ COCO_NAMES = [
 def letterbox(im_bgr: np.ndarray, size: int = 128, color=114):
     """Pad (grey 114) an image to a square `size` while keeping aspect ratio.
 
-    Matches the classic YOLO letterbox: smallest scale factor to fit, then
+    Uses the standard aspect-ratio-preserving letterbox: smallest scale factor to fit, then
     centred padding.  Returns the new image and the (scale, pad-left/top)
     metadata needed to map detections back to the ORIGINAL image coordinates.
     """
@@ -68,7 +68,7 @@ def letterbox(im_bgr: np.ndarray, size: int = 128, color=114):
 
 
 def predict(
-    model: YOLO,
+    model: CandyEye,
     im_bgr: np.ndarray,
     size: int = 128,
     conf: float = 0.35,
@@ -138,7 +138,7 @@ def main() -> int:
     parser.add_argument("--noprint", action="store_true")
     args = parser.parse_args()
 
-    model = YOLO(args.cfg, nc=args.nc, img_size=args.size)
+    model = CandyEye(args.cfg, nc=args.nc, img_size=args.size)
     load_weights(model, load_official_state_dict(args.weights), verbose=True)
 
     im = cv2.imread(str(args.image))

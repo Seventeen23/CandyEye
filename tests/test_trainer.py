@@ -3,6 +3,7 @@ import pytest
 import torch
 
 from core.backbone_mobilenet import MobileNetV3SmallDetector
+from core import CandyEye
 from training.loss import DetectionLoss
 from training.trainer import lr_factor
 
@@ -24,3 +25,35 @@ def test_mobilenet_detector_outputs_and_loss():
     assert torch.isfinite(loss["loss"])
     loss["loss"].backward()
     assert any(p.grad is not None for p in model.parameters() if p.requires_grad)
+
+
+def test_yolo_train_dispatches_to_high_level_api(monkeypatch, tmp_path):
+    import training.trainer as trainer
+    from core import CandyEye as PublicCandyEye
+    from core import train as train_entry
+
+    assert PublicCandyEye.__name__ == "CandyEye"
+
+    seen = {}
+
+    def fake_train(model, **kwargs):
+        seen.update(kwargs)
+        return {"save_dir": tmp_path}
+
+    monkeypatch.setattr(trainer, "train_model", fake_train)
+    model = CandyEye("configs/yolo11.yaml", img_size=64)
+    result = model.train(data="configs/default.yaml", epochs=7, imgsz=96,
+                         batch=8, patience=4)
+
+    assert result["save_dir"] == tmp_path
+    assert seen["epochs"] == 7
+    assert seen["imgsz"] == 96
+    assert seen["batch"] == 8
+    assert seen["patience"] == 4
+    assert model.train(False) is model
+    assert not model.training
+
+    result = train_entry(model="configs/yolo11.yaml", data="configs/default.yaml",
+                         epochs=5, imgsz=64)
+    assert result["save_dir"] == tmp_path
+    assert seen["epochs"] == 5

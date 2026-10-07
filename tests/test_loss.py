@@ -1,7 +1,7 @@
-"""Acceptance tests for TAL assignment and the YOLO detection objective."""
+"""Acceptance tests for TAL assignment and CandyEye's detection objective."""
 import torch
 
-from core.yolo import YOLO
+from core import CandyEye
 from training.assigner import TaskAlignedAssigner
 from training.loss import DetectionLoss
 
@@ -32,7 +32,7 @@ def test_assigner_selects_topk_inside_ground_truth():
 
 
 def test_detection_loss_backpropagates_for_empty_and_nonempty_targets():
-    model = YOLO("configs/yolo11.yaml", img_size=64)
+    model = CandyEye("configs/yolo11.yaml", img_size=64)
     criterion = DetectionLoss(model, topk=3)
     model.train()
     features = model(torch.rand(1, 3, 64, 64))

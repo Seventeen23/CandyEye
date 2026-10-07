@@ -6,7 +6,7 @@ Two weight sources, two purposes:
   bookkeeping*: full nc=80 load (0/0) and the nc=20 class-branch skip set.
   Numerically it is only fp16-checkpoint-close, so it is not a parity proof.
 - The official fp32 ONNX graph's *fused* initializers give an EXACT parity
-  proof: after ``YOLO(...).fuse()`` our state_dict and the graph's weight
+  proof: after ``CandyEye(...).fuse()`` our state_dict and the graph's weight
   tensors align 1:1, and running both graphs on the same input must agree to
   fp noise (``< 1e-4``).
 
@@ -22,7 +22,7 @@ from core.convert_yolo11 import (
     EXPECTED_NC20_SKIPPED, EXPECTED_FUSED_NC20_SKIPPED,
     load_official_state_dict, load_weights, load_fused_from_onnx,
 )
-from core.yolo import YOLO
+from core import CandyEye
 
 CFG = "configs/yolo11.yaml"
 WEIGHTS = "weights/yolo11n.pth"
@@ -32,8 +32,8 @@ sd = load_official_state_dict(WEIGHTS)
 fused = load_fused_from_onnx(ONNX)
 
 
-def make(nc: int, size: int = 128) -> YOLO:
-    return YOLO(CFG, nc=nc, img_size=size)
+def make(nc: int, size: int = 128) -> CandyEye:
+    return CandyEye(CFG, nc=nc, img_size=size)
 
 
 def test_nc80_full_load():

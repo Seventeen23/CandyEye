@@ -1,4 +1,4 @@
-"""CPU trainer and CLI for the VOC experiment matrix."""
+"""CPU trainer, CandyEye Python API, and experiment CLI."""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 
 from core.backbone_mobilenet import MobileNetV3SmallDetector
 from core.convert_yolo11 import load_official_state_dict, load_weights
-from core.yolo import YOLO
+from core import CandyEye
 from data.transforms import Compose, HSVJitter, RandomHorizontalFlip
 from data.voc import VOCDataset, collate_fn
 from training.loss import DetectionLoss
@@ -49,13 +49,13 @@ def build_experiment_model(config: dict, no_pretrained: bool = False):
     init_cfg = config.get("initialization", {})
     model_type = model_cfg.get("type", "yolo")
     if model_type == "yolo":
-        model = YOLO(model_cfg.get("cfg", "configs/yolo11.yaml"),
-                     nc=model_cfg.get("nc", 20),
-                     img_size=model_cfg.get("img_size", 128))
+        model = CandyEye(model_cfg.get("cfg", "configs/yolo11.yaml"),
+                         nc=model_cfg.get("nc", 20),
+                         img_size=model_cfg.get("img_size", 128))
         if init_cfg.get("type") == "yolo11n":
             path = Path(init_cfg.get("weights", "weights/yolo11n.pth"))
             if not path.exists():
-                raise FileNotFoundError(f"pretrained YOLO weights not found: {path}")
+                raise FileNotFoundError(f"pretrained YOLO11 source weights not found: {path}")
             report = load_weights(model, load_official_state_dict(str(path)))
             if report["unexpected"]:
                 raise RuntimeError(f"unexpected pretrained keys: {report['unexpected'][:5]}")
@@ -72,14 +72,18 @@ def build_experiment_model(config: dict, no_pretrained: bool = False):
 
 def run_training(config: dict, *, epochs: int | None = None,
                  max_batches: int | None = None, resume: str | None = None,
-                 no_pretrained: bool = False, threads: int = 4) -> Path:
+                 no_pretrained: bool = False, threads: int = 4,
+                 model=None, patience: int | None = None) -> Path:
     train_cfg, data_cfg, model_cfg = config["train"], config["data"], config["model"]
     epochs = epochs or train_cfg["epochs"]
+    if patience is None:
+        patience = train_cfg.get("patience")
     seed_everything(int(train_cfg.get("seed", 23)))
     torch.set_num_threads(threads)
     device = torch.device("cpu")
 
-    augment = Compose([HSVJitter(), RandomHorizontalFlip()])
+    augment = Compose(train_cfg.get(
+        "api_transforms", [HSVJitter(), RandomHorizontalFlip()]))
     dataset = VOCDataset(
         data_cfg.get("root", "data/VOCdevkit"),
         data_cfg.get("train_split", "trainval"), transform=augment,
@@ -95,13 +99,17 @@ def run_training(config: dict, *, epochs: int | None = None,
     if steps_per_epoch <= 0:
         raise ValueError("training loader has no batches")
 
-    model = build_experiment_model(config, no_pretrained=no_pretrained).to(device)
+    model = (model or build_experiment_model(
+        config, no_pretrained=no_pretrained)).to(device)
     criterion = DetectionLoss(model)
     base_lr = float(train_cfg.get("learning_rate", 1e-3))
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=base_lr,
-        weight_decay=float(train_cfg.get("weight_decay", 5e-4)),
-    )
+    optimizer_name = str(train_cfg.get("optimizer", "adamw")).lower()
+    optimizer_cls = torch.optim.AdamW if optimizer_name == "adamw" else torch.optim.SGD
+    optimizer_kwargs = {"lr": base_lr,
+                        "weight_decay": float(train_cfg.get("weight_decay", 5e-4))}
+    if optimizer_name == "sgd":
+        optimizer_kwargs["momentum"] = .9
+    optimizer = optimizer_cls(model.parameters(), **optimizer_kwargs)
     warmup = float(train_cfg.get("warmup_epochs", 3))
     min_ratio = float(train_cfg.get("min_lr_ratio", .01))
     output = Path(train_cfg.get("output", f"runs/experiments/{config['name']}"))
@@ -109,12 +117,14 @@ def run_training(config: dict, *, epochs: int | None = None,
     log_path = output / "metrics.csv"
     start_epoch = 0
     best_loss = float("inf")
+    best_epoch = 0
     if resume:
         checkpoint = torch.load(resume, map_location="cpu", weights_only=False)
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         start_epoch = int(checkpoint["epoch"])
         best_loss = float(checkpoint.get("best_loss", best_loss))
+        best_epoch = int(checkpoint.get("best_epoch", start_epoch))
         print(f"resumed {resume} at epoch {start_epoch}")
 
     write_header = not log_path.exists() or not resume
@@ -147,19 +157,147 @@ def run_training(config: dict, *, epochs: int | None = None,
 
             means = sums / steps_per_epoch
             epoch_loss = float(means[0])
-            best_loss = min(best_loss, epoch_loss)
+            improved = epoch_loss < best_loss
+            if improved:
+                best_loss = epoch_loss
+                best_epoch = epoch + 1
             log.writerow([epoch + 1, lr, *means[:4], means[4]])
             csv_file.flush()
             state = {"epoch": epoch + 1, "model": model.state_dict(),
                      "optimizer": optimizer.state_dict(), "best_loss": best_loss,
+                     "best_epoch": best_epoch,
                      "config": config}
             torch.save(state, output / "last.pt")
-            if epoch_loss <= best_loss:
+            if improved or not (output / "best.pt").exists():
                 torch.save(state, output / "best.pt")
             print(f"epoch {epoch + 1}/{epochs} loss={epoch_loss:.4f} "
                   f"box={means[1]:.4f} cls={means[2]:.4f} dfl={means[3]:.4f} "
                   f"lr={lr:.2e}", flush=True)
+            if patience is not None and patience > 0 and epoch + 1 - best_epoch >= patience:
+                print(f"early stop: no training-loss improvement for {patience} epochs",
+                      flush=True)
+                break
     return output
+
+
+def _resolve_data(data) -> dict:
+    """Read the project dataset YAML or accept a VOC root/dict directly."""
+    if isinstance(data, (str, Path)):
+        path = Path(data)
+        if path.is_dir():
+            raw = {"root": str(path)}
+        else:
+            with path.open(encoding="utf-8") as f:
+                raw = yaml.safe_load(f) or {}
+    elif isinstance(data, dict):
+        raw = dict(data)
+    else:
+        raise TypeError("data must be a dataset YAML, VOC root path, or mapping")
+    section = raw.get("data", raw)
+    root = section.get("root", section.get("path", "data/VOCdevkit"))
+    train_split = section.get("train_split", "trainval")
+    val_split = section.get("val_split", "test")
+    # Accept conventional VOC ImageSets split file declarations as well.
+    if "train" in section and isinstance(section["train"], str):
+        train_value = Path(section["train"])
+        if train_value.suffix == ".txt":
+            train_split = train_value.stem
+    if "val" in section and isinstance(section["val"], str):
+        val_value = Path(section["val"])
+        if val_value.suffix == ".txt":
+            val_split = val_value.stem
+    return {"root": str(root), "train_split": train_split,
+            "val_split": val_split, "mosaic_probability": 0.0}
+
+
+def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
+                batch: int = 16, patience: int = 50, workers: int = 0,
+                device: str = "cpu", project: str | Path = "runs/train",
+                name: str = "exp", resume: bool | str | Path = False,
+                optimizer: str = "AdamW", lr0: float = 1e-3,
+                weight_decay: float = 5e-4, warmup_epochs: float = 3,
+                mosaic: float = .5, hsv: bool = True, fliplr: float = .5,
+                pretrained: bool | str | Path = False, seed: int = 23,
+                exist_ok: bool = False, max_batches: int | None = None,
+                threads: int = 4) -> dict:
+    """Train an existing CandyEye detector from Python.
+
+    `patience` monitors mean training loss until a validation metric is
+    implemented. Training is CPU-only in this release.
+    """
+    if epochs <= 0 or imgsz <= 0 or imgsz % 32:
+        raise ValueError("epochs must be positive and imgsz divisible by 32")
+    if batch <= 0 or workers < 0:
+        raise ValueError("batch must be positive and workers nonnegative")
+    if device not in ("cpu", "auto"):
+        raise ValueError("this trainer currently supports CPU only")
+    optimizer_name = optimizer.lower()
+    if optimizer_name not in ("adamw", "sgd"):
+        raise ValueError("optimizer must be 'AdamW' or 'SGD'")
+
+    data_cfg = _resolve_data(data)
+    data_cfg.update({"batch_size": batch, "workers": workers,
+                     "mosaic_probability": mosaic})
+    cfg_name = str(getattr(model, "yaml", "configs/yolo11.yaml"))
+    nc = int(getattr(model, "nc", getattr(model.model[-1], "nc", 20)))
+    config = {
+        "name": name,
+        "model": {"type": "yolo", "cfg": cfg_name, "nc": nc,
+                  "img_size": imgsz},
+        "initialization": {"type": "scratch"},
+        "data": data_cfg,
+        "train": {"epochs": epochs, "learning_rate": lr0,
+                  "weight_decay": weight_decay, "warmup_epochs": warmup_epochs,
+                  "min_lr_ratio": .01, "seed": seed},
+    }
+    output = Path(project) / name
+    if isinstance(resume, (str, Path)):
+        resume_path = Path(resume)
+    elif resume:
+        resume_path = output / "last.pt"
+    else:
+        resume_path = None
+    if resume_path is None and output.exists() and not exist_ok:
+        base, suffix = name, 2
+        while (Path(project) / f"{base}{suffix}").exists():
+            suffix += 1
+        name = f"{base}{suffix}"
+        output = Path(project) / name
+        config["name"] = name
+    if pretrained:
+        weights_path = (Path(pretrained) if not isinstance(pretrained, bool)
+                        else Path("weights/yolo11n.pth"))
+        if not weights_path.exists():
+            raise FileNotFoundError(f"pretrained weights not found: {weights_path}")
+        report = load_weights(model, load_official_state_dict(str(weights_path)))
+        print(f"loaded {len(report['loaded'])} matching pretrained tensors; "
+              f"skipped {len(report['skipped'])}")
+    if resume_path is not None and not resume_path.exists():
+        raise FileNotFoundError(f"resume checkpoint not found: {resume_path}")
+
+    # Update the loss-independent augmentation choices for this API invocation.
+    transforms = []
+    if hsv:
+        transforms.append(HSVJitter())
+    if fliplr > 0:
+        transforms.append(RandomHorizontalFlip(probability=fliplr))
+    # run_training uses the defaults for its CLI; attach per-run options here.
+    config["train"]["api_transforms"] = transforms
+    config["train"]["optimizer"] = optimizer_name
+    config["train"]["output"] = str(output)
+    config["train"]["patience"] = patience
+    result_dir = run_training(config, epochs=epochs, max_batches=max_batches,
+                              resume=str(resume_path) if resume_path else None,
+                              threads=threads, model=model, patience=patience)
+    return {"save_dir": result_dir, "best": result_dir / "best.pt",
+            "last": result_dir / "last.pt", "results": result_dir / "metrics.csv"}
+
+
+def train(model: str | Path | dict = "configs/yolo11.yaml", *, data,
+          nc: int = 20, **kwargs) -> dict:
+    """Create a CandyEye model from architecture YAML and train it."""
+    candyeye = CandyEye(model, nc=nc, img_size=kwargs.get("imgsz", 128))
+    return train_model(candyeye, data=data, **kwargs)
 
 
 def main() -> int:

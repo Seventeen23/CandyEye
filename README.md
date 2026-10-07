@@ -58,8 +58,44 @@ pip install -e .
 python scripts/download_voc.py
 ```
 
-Training/eval/predict commands are not available yet — see
-[ROADMAP.md](ROADMAP.md) for what lands in which phase.
+## Training
+
+Training is available through CandyEye's Python API. The model YAML defines
+the architecture; the data YAML points to the VOC dataset and split names.
+
+```python
+from core import CandyEye
+
+model = CandyEye("configs/yolo11.yaml")
+results = model.train(
+    data="configs/default.yaml",
+    epochs=100,
+    imgsz=128,
+    batch=16,
+    patience=20,
+    workers=0,
+    project="runs/train",
+    name="voc_yolo11",
+)
+print(results["best"])
+```
+
+This CPU-first trainer saves `best.pt`, `last.pt`, and `metrics.csv` in the
+run directory. Resume with `resume=True` or pass a checkpoint path. `imgsz`
+must be divisible by 32. `patience` stops after that many epochs without an
+improvement in training loss; validation-based early stopping and mAP reporting
+are still in progress.
+
+For a function-style entry point:
+
+```python
+from core import train
+
+results = train(model="configs/yolo11.yaml", data="configs/default.yaml",
+                epochs=100, imgsz=128, batch=16, patience=20)
+```
+
+See [ROADMAP.md](ROADMAP.md) for current evaluation and export work.
 
 > **Note:** package installation currently doesn't expose the modules outside
 > the repo root — run scripts from the repo root (see
@@ -79,7 +115,7 @@ CandyEye/
 │   ├── functions/              # stateless helpers (autopad, make_divisible) ✓
 │   ├── modules/                # nn.Module blocks (Conv ✓ · Bottleneck, C3k2,
 │   │                            #   SPPF, C2PSA, DFL, Detect        Phase 1)
-│   ├── yolo.py                 # YAML builder + forward graph     (Phase 1)
+│   ├── candyeye.py             # YAML builder + forward graph    (Phase 1)
 │   └── convert_yolo11.py       # yolo11n.pt / ONNX → our state_dict (Phase 2)
 ├── training/                   # assigner, loss, trainer          (Phases 4–5)
 ├── eval/                       # mAP@0.5                          (Phase 6)

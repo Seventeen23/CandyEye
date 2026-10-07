@@ -1,4 +1,4 @@
-"""YOLO detection objective: class BCE, CIoU box loss, and DFL."""
+"""CandyEye objective: class BCE, CIoU box loss, and DFL."""
 from __future__ import annotations
 
 import torch

@@ -5,13 +5,13 @@ Run:  PYTHONPATH=. venv/bin/python -m pytest tests/test_model.py -q
 import torch
 import pytest
 
-from core.yolo import YOLO
+from core import CandyEye
 
 CFG = "configs/yolo11.yaml"
 
 
-def make(**kw) -> YOLO:
-    return YOLO(CFG, **kw)
+def make(**kw) -> CandyEye:
+    return CandyEye(CFG, **kw)
 
 
 def test_forward_shapes_and_strides():

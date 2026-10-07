@@ -119,8 +119,8 @@ def parse_model(data: dict) -> nn.Sequential:
     return nn.Sequential(*layers)
 
 
-class YOLO(nn.Module):
-    """The CandyEye detector: nn.Sequential graph + Detect head with strides."""
+class CandyEye(nn.Module):
+    """CandyEye detector: YAML-built graph and anchor-free Detect head."""
 
     def __init__(self, cfg: str = "configs/yolo11.yaml", nc: int | None = None, img_size: int = 128):
         super().__init__()
@@ -130,6 +130,7 @@ class YOLO(nn.Module):
             data["nc"] = nc
         self.model = parse_model(data)
         self.yaml = cfg
+        self.img_size = img_size
         if img_size % 32:
             raise ValueError(f"img_size must be divisible by 32, got {img_size}")
         self.stride = self._detect_stride(img_size)
@@ -141,7 +142,7 @@ class YOLO(nn.Module):
 
         with open(cfg) as fh:
             data = yaml.safe_load(fh)
-        YOLO._validate_yaml(data)
+        CandyEye._validate_yaml(data)
         return data
 
     @staticmethod
@@ -176,6 +177,37 @@ class YOLO(nn.Module):
             x = m(xi)
             y.append(x)
         return x
+
+    def train(self, mode: bool = True, *, data=None, epochs: int = 100,
+              imgsz: int | None = None, batch: int = 16, patience: int = 50,
+              workers: int = 0, device: str = "cpu",
+              project: str | Path = "runs/train", name: str = "exp",
+              resume: bool | str | Path = False, optimizer: str = "AdamW",
+              lr0: float = 1e-3, weight_decay: float = 5e-4,
+              warmup_epochs: float = 3, mosaic: float = .5,
+              hsv: bool = True, fliplr: float = .5,
+              pretrained: bool | str | Path = False, seed: int = 23,
+              exist_ok: bool = False, max_batches: int | None = None,
+              threads: int = 4):
+        """Set PyTorch mode or launch CandyEye training when `data` is set.
+
+        Example: ``model.train(data="configs/default.yaml", epochs=100,
+        imgsz=128, batch=16, patience=20)``. When called without `data`, this
+        retains the standard ``nn.Module.train(mode)`` behavior.
+        """
+        if data is None:
+            return super().train(mode)
+        from training.trainer import train_model
+
+        return train_model(
+            self, data=data, epochs=epochs, imgsz=imgsz or self.img_size,
+            batch=batch, patience=patience, workers=workers, device=device,
+            project=project, name=name, resume=resume, optimizer=optimizer,
+            lr0=lr0, weight_decay=weight_decay, warmup_epochs=warmup_epochs,
+            mosaic=mosaic, hsv=hsv, fliplr=fliplr, pretrained=pretrained,
+            seed=seed, exist_ok=exist_ok, max_batches=max_batches,
+            threads=threads,
+        )
 
     def fuse(self):
         """Fold every BatchNorm into its conv (in place).

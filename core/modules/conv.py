@@ -1,6 +1,6 @@
 """Convolution building block.
 
-The smallest reusable unit of the YOLO-style architecture: a conv, its
+The smallest reusable unit in CandyEye: a conv, its
 batch-norm, and an activation, bundled as one nn.Module.
 
 Connection to the other folder: we import `autopad` from
@@ -36,7 +36,7 @@ class Conv(nn.Module):
         act: True -> SiLU (default), False -> Identity (linear output),
              or pass an nn.Module directly (e.g. nn.LeakyReLU) to override.
 
-    Layer order (conv -> bn -> act) matches YOLO exactly, which matters in
+    Layer order (conv -> bn -> act) matches the source architecture exactly, which matters in
     Phase 2: state_dict keys then line up 1:1 with the official weights,
     so `model.0.conv.weight` in the checkpoint lands on `self.conv.weight`.
     """
