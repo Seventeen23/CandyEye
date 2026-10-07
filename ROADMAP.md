@@ -54,10 +54,10 @@ simultaneously over shared conv features — no mask branch, boxes only).
 
 **Goal:** training-ready batches.
 
-- [ ] Letterbox + resize transforms (raw xyxy → normalized cxcywh after)
-- [ ] Mosaic, HSV jitter, horizontal flip
-- [ ] Collate (image stack + `(img_idx, cls, cx, cy, w, h)` targets)
-- [ ] Batch visualization with GT boxes
+- [x] Letterbox + resize transforms (raw xyxy → normalized cxcywh after)
+- [x] Mosaic, HSV jitter, horizontal flip
+- [x] Collate (image stack + `(img_idx, cls, cx, cy, w, h)` targets)
+- [x] Batch visualization with GT boxes
 
 ## Phase 4 — Assigner & loss
 

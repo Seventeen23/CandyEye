@@ -1,6 +1,6 @@
 # Status — Current Phase
 
-**Phase 2: Pretrained demo — COMPLETE → Phase 3: Data pipeline (todo)**  
+**Phase 3: Data pipeline — COMPLETE → Phase 4: Assigner & loss (todo)**
 Last updated: 2026-10-07 (Phase 2 done in working tree; user commit pending)
 
 ---
@@ -11,7 +11,8 @@ Last updated: 2026-10-07 (Phase 2 done in working tree; user commit pending)
 Phase 0 ██████████ complete
 Phase 1 ██████████ complete   (model, 5/5 tests, reviewed)
 Phase 2 ██████████ complete   (official weights load + ONNX parity + live demo)
-Phase 3 █░░░░░░░░░ todo       (data pipeline)
+Phase 3 ██████████ complete  (data pipeline)
+Phase 4 ░░░░░░░░░░ todo       (assigner & loss)
 ```
 
 Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
@@ -124,7 +125,7 @@ Bugs caught during build-out (all in `core/yolo.py`, now fixed):
 1. **Review → user commit** (working tree: `core/yolo.py` fixes, `core/convert_yolo11.py`,
    `inference/predict.py`, `tests/test_convert.py`, `scripts/bootstrap_weights.py`,
    `core/modules/conv.py` + `blocks.py` fixes) → Phase 3
-2. Phase 3 (data pipeline): letterbox/resize/augment collate + batch viz
+2. Phase 4 (assigner & loss): Task-Aligned assigner + detection loss
 
 ## Phase 2 checklist
 
@@ -154,6 +155,25 @@ Details: the `.pt`/`.pth` ship fp16 weights, so "checkpoint-load" parity vs the 
 **Param target corrected 2026-10-07:** nc=20 total is **2,593,740**
 (layers 0–22 = 2,159,168 + Detect = 434,572); earlier 2,592,740 was off by 1k.
 Detect(nc=80)=464,912 matches the official model exactly.
+
+## Phase 3 checklist
+
+- [x] `data/transforms.py` — square letterbox with xyxy box remap, HSV jitter,
+  horizontal flip, and composable transforms
+- [x] `VOCDataset` — fixed-size samples and optional four-image mosaic
+- [x] `collate_fn` — normalized BCHW float images and YOLO `(batch_idx, cls,
+  cx, cy, w, h)` targets
+- [x] `scripts/visualize_batch.py` — training batch and GT overlay saved to
+  `runs/batch.jpg`
+
+### Phase 3 acceptance
+
+| Check | Result |
+|---|---|
+| Real VOC batch shape | **pass** `(4, 3, 128, 128)` |
+| Mosaic + augmentation target packing | **pass** `(44, 6)` targets |
+| Batch visualization | **pass** (`runs/batch.jpg`, 242015 bytes; box alignment inspected) |
+| DataLoader workers=2 in sandbox | unavailable (sandbox denied forkserver bind); workers=0 pass |
 
 ---
 

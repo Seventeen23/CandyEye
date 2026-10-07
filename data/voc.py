@@ -6,6 +6,8 @@ import cv2
 import numpy as np
 import torch
 
+from data.transforms import letterbox
+
 
 VOC_CLASSES = (
     "aeroplane", "bicycle", "bird", "boat", "bottle",
@@ -23,10 +25,14 @@ class VOCDataset(torch.utils.data.Dataset):
         root: str | Path,
         split: str,
         transform: Callable | None = None,
+        img_size: int = 128,
+        mosaic_probability: float = 0.0,
     ):
         self.root = Path(root)
         self.split = split
         self.transform = transform
+        self.img_size = img_size
+        self.mosaic_probability = mosaic_probability
 
         self.voc_dir = self.root / "VOC2007"
 
@@ -52,7 +58,7 @@ class VOCDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return len(self.ids)
 
-    def __getitem__(self, idx: int) -> dict:
+    def _load_sample(self, idx: int) -> dict:
         img_id = self.ids[idx]
 
         image_path = self.images_dir / f"{img_id}.jpg"
@@ -135,15 +141,6 @@ class VOCDataset(torch.utils.data.Dataset):
             dtype=np.bool_,
         )
 
-        # Optional transform
-        if self.transform is not None:
-            image, boxes, labels, difficult = self.transform(
-                image,
-                boxes,
-                labels,
-                difficult,
-            )
-
         return {
             "image": image,
             "boxes": boxes,
@@ -152,12 +149,63 @@ class VOCDataset(torch.utils.data.Dataset):
             "img_id": img_id,
         }
 
+    def __getitem__(self, idx: int) -> dict:
+        if self.split == "trainval" and self.mosaic_probability > 0 and \
+                np.random.random() < self.mosaic_probability:
+            indices = [idx] + np.random.randint(0, len(self), size=3).tolist()
+            samples = [self._load_sample(i) for i in indices]
+            image, boxes, labels, difficult = self._mosaic(samples)
+            sample = {"image": image, "boxes": boxes, "labels": labels,
+                      "difficult": difficult, "img_id": samples[0]["img_id"]}
+        else:
+            sample = self._load_sample(idx)
+            sample["image"], sample["boxes"] = letterbox(
+                sample["image"], sample["boxes"], self.img_size)
 
-def collate_fn(batch: list[dict]) -> list[dict]:
-    """List collate: samples stay a list (variable image sizes / box counts).
+        if self.transform is not None:
+            sample["image"], sample["boxes"], sample["labels"], sample["difficult"] = \
+                self.transform(sample["image"], sample["boxes"],
+                               sample["labels"], sample["difficult"])
+        return sample
 
-    Must be a module-level function: Python 3.14's forkserver DataLoader
-    start method pickles it, so lambdas from __main__ fail. Phase 3 replaces
-    this with resize+pad batching.
-    """
-    return batch
+    def _mosaic(self, samples: list[dict]):
+        """Compose four letterboxed images into a fixed-size 2x2 mosaic."""
+        half = self.img_size // 2
+        canvas = np.full((self.img_size, self.img_size, 3), 114, dtype=np.uint8)
+        all_boxes, all_labels, all_difficult = [], [], []
+        for i, sample in enumerate(samples):
+            image, boxes = letterbox(sample["image"], sample["boxes"], half)
+            xoff, yoff = (i % 2) * half, (i // 2) * half
+            canvas[yoff:yoff + half, xoff:xoff + half] = image
+            if len(boxes):
+                boxes = boxes.copy()
+                boxes[:, [0, 2]] += xoff
+                boxes[:, [1, 3]] += yoff
+                all_boxes.append(boxes)
+                all_labels.append(sample["labels"])
+                all_difficult.append(sample["difficult"])
+        return (canvas,
+                np.concatenate(all_boxes).astype(np.float32) if all_boxes else np.zeros((0, 4), np.float32),
+                np.concatenate(all_labels) if all_labels else np.zeros((0,), np.int64),
+                np.concatenate(all_difficult) if all_difficult else np.zeros((0,), np.bool_))
+
+
+def collate_fn(batch: list[dict]) -> dict:
+    """Stack images and pack targets as ``(batch_idx, cls, cx, cy, w, h)``."""
+    images = torch.stack([
+        torch.from_numpy(np.ascontiguousarray(s["image"]))
+        .permute(2, 0, 1).float().div_(255.0) for s in batch
+    ])
+    targets = []
+    for batch_idx, sample in enumerate(batch):
+        boxes = torch.as_tensor(sample["boxes"], dtype=torch.float32).reshape(-1, 4)
+        labels = torch.as_tensor(sample["labels"], dtype=torch.float32).reshape(-1, 1)
+        if len(boxes):
+            x1, y1, x2, y2 = boxes.unbind(1)
+            xywh = torch.stack(((x1 + x2) / 2, (y1 + y2) / 2,
+                                x2 - x1, y2 - y1), dim=1) / images.shape[-1]
+            bi = torch.full((len(boxes), 1), batch_idx, dtype=torch.float32)
+            targets.append(torch.cat((bi, labels, xywh), dim=1))
+    targets = torch.cat(targets) if targets else torch.zeros((0, 6), dtype=torch.float32)
+    return {"images": images, "targets": targets,
+            "img_ids": [s["img_id"] for s in batch]}
