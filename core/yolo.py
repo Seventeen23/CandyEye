@@ -176,3 +176,21 @@ class YOLO(nn.Module):
             x = m(xi)
             y.append(x)
         return x
+
+    def fuse(self):
+        """Fold every BatchNorm into its conv (in place).
+
+        Puts the model in eval mode first (BN running stats are the whole
+        point of fusing).  After this, state_dict keys match the ONNX
+        versions of the model (``model.0.conv.weight`` +
+        ``model.0.conv.bias``, no ``.bn.*``), and ``load_fused_from_onnx``
+        can copy the official fp32 weights 1:1.  Numerical parity with the
+        official export is then exact, not "fp16 checkpoint drift" close.
+        """
+        from core.modules.conv import Conv
+
+        self.eval()
+        for m in self.modules():
+            if isinstance(m, Conv):
+                m.fuse()
+        return self
