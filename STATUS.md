@@ -1,6 +1,6 @@
 # Status — Current Phase
 
-**Phase 3: Data pipeline — COMPLETE → Phase 4: Assigner & loss (todo)**
+**Phase 4: Assigner & loss — COMPLETE → Phase 5: Trainer (todo)**
 Last updated: 2026-10-07 (Phase 2 done in working tree; user commit pending)
 
 ---
@@ -12,7 +12,8 @@ Phase 0 ██████████ complete
 Phase 1 ██████████ complete   (model, 5/5 tests, reviewed)
 Phase 2 ██████████ complete   (official weights load + ONNX parity + live demo)
 Phase 3 ██████████ complete  (data pipeline)
-Phase 4 ░░░░░░░░░░ todo       (assigner & loss)
+Phase 4 ██████████ complete  (assigner & loss)
+Phase 5 ░░░░░░░░░░ todo       (trainer & experiment matrix)
 ```
 
 Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
@@ -125,7 +126,7 @@ Bugs caught during build-out (all in `core/yolo.py`, now fixed):
 1. **Review → user commit** (working tree: `core/yolo.py` fixes, `core/convert_yolo11.py`,
    `inference/predict.py`, `tests/test_convert.py`, `scripts/bootstrap_weights.py`,
    `core/modules/conv.py` + `blocks.py` fixes) → Phase 3
-2. Phase 4 (assigner & loss): Task-Aligned assigner + detection loss
+2. Phase 5 (trainer): checkpoints, schedule, logging, experiment configs
 
 ## Phase 2 checklist
 
@@ -174,6 +175,16 @@ Detect(nc=80)=464,912 matches the official model exactly.
 | Mosaic + augmentation target packing | **pass** `(44, 6)` targets |
 | Batch visualization | **pass** (`runs/batch.jpg`, 242015 bytes; box alignment inspected) |
 | DataLoader workers=2 in sandbox | unavailable (sandbox denied forkserver bind); workers=0 pass |
+
+## Phase 4 checklist
+
+- [x] `training/assigner.py` — Task-Aligned assignment (top-k 10, α=.5, β=6),
+  inside-GT filtering, conflict resolution, IoU-aligned soft class targets
+- [x] `training/loss.py` — classification BCE, CIoU box loss, interpolated DFL
+- [x] `tests/test_loss.py` — no-GT, top-k positive count, empty/nonempty loss and
+  backward checks (**3 passed**)
+- [x] 32-image VOC overfit: AdamW lr=.001, batch=4, 10 epochs at 64px;
+  mean loss 1038.80 → 148.22 (**85.7% reduction**, target >70%)
 
 ---
 

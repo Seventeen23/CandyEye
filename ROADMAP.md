@@ -63,10 +63,10 @@ simultaneously over shared conv features — no mask branch, boxes only).
 
 **Goal:** loss that can overfit a tiny set.
 
-- [ ] Task-Aligned assigner (top-k=10, α=0.5, β=6.0)
-- [ ] `DetectionLoss` = BCE(cls) + CIoU(box) + CrossEntropy(DFL)
-- [ ] Assigner unit tests (no-GT edge case, top-k counts)
-- [ ] Overfit 32 images: loss ↓ > 70%, predictions converge
+- [x] Task-Aligned assigner (top-k=10, α=0.5, β=6.0)
+- [x] `DetectionLoss` = BCE(cls) + CIoU(box) + CrossEntropy(DFL)
+- [x] Assigner unit tests (no-GT edge case, top-k counts)
+- [x] Overfit 32 images: loss ↓ > 70%, predictions converge
 
 ## Phase 5 — Trainer & experiment matrix
 
