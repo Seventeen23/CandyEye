@@ -5,6 +5,7 @@ import argparse
 import copy
 import csv
 import math
+import os
 import random
 import time
 from pathlib import Path
@@ -14,14 +15,26 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from core.backbone_mobilenet import MobileNetV3SmallDetector
-from core.convert_yolo11 import load_official_state_dict, load_weights, remap_prefix
-from core import CandyEye
-from data.transforms import Compose, HSVJitter, RandomHorizontalFlip
-from data.yolo import YoloTxtDataset
-from data.voc import VOC_CLASSES, VOCDataset, collate_fn
-from eval.detection_metrics import evaluate_detector
-from training.loss import DetectionLoss
+from candyeye.core.backbone_mobilenet import MobileNetV3SmallDetector
+from candyeye.core.convert_yolo11 import load_official_state_dict, load_weights, remap_prefix
+from candyeye.core import CandyEye
+from candyeye.data.transforms import Compose, HSVJitter, RandomHorizontalFlip
+from candyeye.data.yolo import YoloTxtDataset
+from candyeye.data.voc import VOC_CLASSES, VOCDataset, collate_fn
+from candyeye.eval.detection_metrics import evaluate_detector
+from candyeye.paths import default_weights_path, resolve_config
+from candyeye.training.loss import DetectionLoss
+
+
+def resolve_threads(threads: int | None = None) -> int:
+    """Pick a CPU-appropriate thread count.
+
+    ``None`` (the default) uses every logical core, which is a sensible base
+    for CPU-only training; pass an int to cap it.
+    """
+    if threads is None:
+        return os.cpu_count() or 4
+    return max(1, int(threads))
 
 
 def _save_training_plots(metrics_path: Path, output: Path) -> Path | None:
@@ -192,7 +205,7 @@ def build_experiment_model(config: dict, no_pretrained: bool = False):
     init_cfg = config.get("initialization", {})
     model_type = model_cfg.get("type", "yolo")
     if model_type == "yolo":
-        cfg = model_cfg.get("cfg", "configs/yolo11.yaml")
+        cfg = resolve_config(model_cfg.get("cfg"))
         gate = model_cfg.get("exchange_gate")
         iters = model_cfg.get("exchange_iters")
         if gate is not None or iters is not None:
@@ -201,7 +214,7 @@ def build_experiment_model(config: dict, no_pretrained: bool = False):
                          nc=model_cfg.get("nc", 20),
                          img_size=model_cfg.get("img_size", 128))
         if init_cfg.get("type") == "yolo11n":
-            path = Path(init_cfg.get("weights", "weights/yolo11n.pth"))
+            path = Path(init_cfg.get("weights")) if init_cfg.get("weights") else default_weights_path()
             if not path.exists():
                 raise FileNotFoundError(f"pretrained YOLO11 source weights not found: {path}")
             official = load_official_state_dict(str(path))
@@ -227,7 +240,7 @@ def build_experiment_model(config: dict, no_pretrained: bool = False):
 
 def run_training(config: dict, *, epochs: int | None = None,
                  max_batches: int | None = None, resume: str | None = None,
-                 no_pretrained: bool = False, threads: int = 4,
+                 no_pretrained: bool = False, threads: int | None = None,
                  model=None, patience: int | None = None,
                  exist_ok: bool = False) -> Path:
     train_cfg, data_cfg, model_cfg = config["train"], config["data"], config["model"]
@@ -235,7 +248,7 @@ def run_training(config: dict, *, epochs: int | None = None,
     if patience is None:
         patience = train_cfg.get("patience")
     seed_everything(int(train_cfg.get("seed", 23)))
-    torch.set_num_threads(threads)
+    torch.set_num_threads(resolve_threads(threads))
     device = torch.device("cpu")
     model = (model or build_experiment_model(
         config, no_pretrained=no_pretrained)).to(device)
@@ -585,7 +598,7 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
                 mosaic: float = .5, hsv: bool = True, fliplr: float = .5,
                 pretrained: bool | str | Path = False, seed: int = 23,
                 exist_ok: bool = False, max_batches: int | None = None,
-                threads: int = 4) -> dict:
+                threads: int | None = None) -> dict:
     """Train an existing CandyEye detector from Python.
 
     Each epoch reports train/validation losses and aggregate validation metrics;
@@ -614,7 +627,7 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
             model.set_classes(data_nc)
     data_cfg.update({"batch_size": batch, "workers": workers,
                      "mosaic_probability": mosaic})
-    cfg_name = str(getattr(model, "yaml", "configs/yolo11.yaml"))
+    cfg_name = getattr(model, "yaml", None) or str(default_config_path())
     nc = int(getattr(model, "nc", getattr(model.model[-1], "nc", 20)))
     config = {
         "name": name,
@@ -642,7 +655,7 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
         config["name"] = name
     if pretrained:
         weights_path = (Path(pretrained) if not isinstance(pretrained, bool)
-                        else Path("weights/yolo11n.pth"))
+                        else default_weights_path())
         if not weights_path.exists():
             raise FileNotFoundError(f"pretrained weights not found: {weights_path}")
         report = load_weights(model, load_official_state_dict(str(weights_path)))
@@ -675,9 +688,14 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
             "confusion_matrix_csv": existing(result_dir / "confusion_matrix.csv")}
 
 
-def train(model: str | Path | dict = "configs/yolo11.yaml", *, data,
-          nc: int = 20, **kwargs) -> dict:
-    """Create a CandyEye model from architecture YAML and train it."""
+def train(model: str | Path | dict | None = None, *, data,
+          nc: int | None = None, **kwargs) -> dict:
+    """Create a CandyEye model from an architecture config and train it.
+
+    ``model`` may be a bundled config name (``"yolo11"``), a YAML path, a
+    parsed config dict, or ``None`` for the default architecture.  ``data`` is
+    a dataset YAML path or a VOC-style config dict.
+    """
     candyeye = CandyEye(model, nc=nc, img_size=kwargs.get("imgsz", 128))
     return train_model(candyeye, data=data, **kwargs)
 
@@ -692,7 +710,8 @@ def main() -> int:
                         help="overwrite an existing run directory instead of renaming it")
     parser.add_argument("--no-pretrained", action="store_true",
                         help="skip optional ImageNet initialization (offline smoke runs)")
-    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--threads", type=int, default=None,
+                        help="torch CPU threads (default: all logical cores)")
     args = parser.parse_args()
     with args.config.open(encoding="utf-8") as f:
         config = yaml.safe_load(f)

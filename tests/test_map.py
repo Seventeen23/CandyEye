@@ -1,7 +1,7 @@
 """Hand-computed tests for VOC AP and difficult annotations."""
 import pytest
 
-from eval.map import evaluate_map, evaluate_map50
+from candyeye.eval.map import evaluate_map, evaluate_map50
 
 
 def test_all_point_ap_matches_hand_computed_example():

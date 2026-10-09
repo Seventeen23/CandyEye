@@ -46,7 +46,7 @@ initialized:
 
 ### Adaptive cross-scale exchange neck
 
-`core/modules/exchange.py` adds an optional `ScaleExchange` neck that sits
+`candyeye/core/modules/exchange.py` adds an optional `ScaleExchange` neck that sits
 between the existing FPN and the Detect head. Instead of only the fixed
 top-down/bottom-up path, adjacent pyramid levels (P3↔P4, P4↔P5) pass a cheap
 depthwise message whose admission is controlled by a gate:
@@ -66,36 +66,42 @@ the MobileNet model, with experiment configs under `configs/experiments/`
 (`isda_baseline`, `isda_exchange_{none,static,dynamic}`, and the
 `isda_mobilenet_*` variants).
 
-## Quickstart
+## Install
 
 ```bash
-# Environment (Python 3.14, CPU-only PyTorch)
-python3 -m venv venv
-source venv/bin/activate
-pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-pip install onnx onnxruntime opencv-python-headless pyyaml tqdm pillow matplotlib pytest
-pip install -e .
-
-# PASCAL VOC 2007 (~870 MB download, ~2 GB extracted)
-python scripts/download_voc.py
+pip install CandyEye        # from PyPI (once published)
+pip install -e .            # or, from a checkout
 ```
+
+For a CPU-only PyTorch wheel (recommended on laptops):
+
+```bash
+pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+```
+
+The wheel bundles the default `yolo11`/`yolo11_exchange` architecture configs and
+the clean `yolo11n` weights (`assets/yolo11n.pth`), so `CandyEye()` and
+`train(..., pretrained=True)` work with no checkout and no download.
 
 ## Training
 
-Training is available through CandyEye's Python API. The model YAML defines
-the architecture; the data YAML points to the VOC dataset and split names.
+Training is available through CandyEye's Python API. The model config defines
+the architecture (bundled names such as `"yolo11"` or `"yolo11_exchange"`, a
+YAML path, or a parsed dict); the data YAML points to your dataset and split
+names.
 
 ```python
-from core import CandyEye
+from candyeye import CandyEye
 
-model = CandyEye("configs/yolo11.yaml")
+model = CandyEye()  # bundled yolo11 architecture
 results = model.train(
-    data="configs/default.yaml",
+    data="dataset.yaml",
     epochs=100,
     imgsz=128,
     batch=16,
     patience=20,
     workers=0,
+    pretrained=True,  # start from the bundled yolo11n weights
     project="runs/train",
     name="voc_yolo11",
 )
@@ -135,7 +141,7 @@ from the dataset YAML and saves annotated output under `runs/predict/` by
 default:
 
 ```python
-from inference.predict import CandyEyePredictor
+from candyeye import CandyEyePredictor
 
 predictor = CandyEyePredictor(
     weights="runs/train/fruit_smoke_test/best.pt",
@@ -162,10 +168,10 @@ specific output file.
 For a function-style entry point:
 
 ```python
-from core import train
+from candyeye import train
 
-results = train(model="configs/yolo11.yaml", data="configs/default.yaml",
-                epochs=100, imgsz=128, batch=16, patience=20)
+results = train(data="dataset.yaml", epochs=100, imgsz=128, batch=16,
+                patience=20, pretrained=True)
 ```
 
 ### Evaluation and benchmarking
@@ -206,10 +212,10 @@ the image dimensions. Pass the YAML path directly; CandyEye reads `nc` (or
 counts `names`) and configures its class head automatically:
 
 ```python
-from core import CandyEye
+from candyeye import CandyEye
 
 data_yaml = "/datasets/my-export/data.yaml"
-model = CandyEye("configs/yolo11.yaml")
+model = CandyEye()  # or CandyEye("yolo11_exchange") for the exchange neck
 results = model.train(data=data_yaml, epochs=100, imgsz=128,
                       batch=16, patience=20)
 ```
@@ -224,25 +230,28 @@ See [ROADMAP.md](ROADMAP.md) for current evaluation and export work.
 
 ```
 CandyEye/
-├── configs/
-│   ├── default.yaml            # img_size, splits, class count
-│   └── yolo11.yaml             # model architecture, nc=20      (Phase 1)
-├── data/
-│   ├── voc.py                  # VOCDataset (XML parsing, clamping, collate_fn)
-│   └── VOCdevkit/              # VOC2007 (gitignored; scripts/download_voc.py)
-├── core/
-│   ├── functions/              # stateless helpers (autopad, make_divisible) ✓
-│   ├── modules/                # nn.Module blocks (Conv ✓ · Bottleneck, C3k2,
-│   │                            #   SPPF, C2PSA, DFL, Detect        Phase 1)
-│   ├── candyeye.py             # YAML builder + forward graph    (Phase 1)
-│   └── convert_yolo11.py       # yolo11n.pt / ONNX → our state_dict (Phase 2)
-├── training/                   # assigner, loss, trainer          (Phases 4–5)
-├── eval/                       # mAP@0.5                          (Phase 6)
-├── inference/                  # predict.py already (Phase 2 preview of 7)
-├── export/                     # ONNX export, benchmark, INT8     (Phase 8)
-├── scripts/                    # download_voc, inspect_data, train/eval/predict CLIs
+├── candyeye/                   # pip-installable package (import candyeye)
+│   ├── __init__.py             # public API: CandyEye, train, CandyEyePredictor
+│   ├── paths.py                # packaged config + weight resolution
+│   ├── configs/                # bundled architecture YAMLs (package data)
+│   │   ├── yolo11.yaml
+│   │   └── yolo11_exchange.yaml
+│   ├── assets/yolo11n.pth      # bundled clean weights (package data)
+│   ├── core/                   # model builder + nn.Module blocks
+│   │   ├── functions/          # stateless helpers (autopad, make_divisible)
+│   │   ├── modules/            # Conv, Bottleneck, C3k2, SPPF, C2PSA, DFL, Detect, ScaleExchange
+│   │   ├── candyeye.py         # YAML builder + forward graph
+│   │   └── convert_yolo11.py   # yolo11n.pt / ONNX → our state_dict
+│   ├── data/                   # VOC + YOLO-txt datasets, transforms
+│   ├── training/               # assigner, loss, trainer
+│   ├── eval/                   # mAP (mAP@0.5, mAP@0.5:0.95, size buckets)
+│   └── inference/              # predict.py (CandyEyePredictor)
+├── configs/experiments/        # ablation configs (Isda 9-class)
+├── data/                       # datasets + VOCdevkit (gitignored)
+├── export/                     # ONNX export, benchmark, INT8 (Phase 8)
+├── scripts/                    # inspect_data, evaluate, benchmark, bootstrap_weights
 ├── runs/                       # outputs (gitignored)
-└── tests/                      # shape, assigner, loss, mAP, ONNX parity
+└── tests/                      # shape, assigner, loss, mAP, exchange, ONNX parity
 ```
 
 ## How it's built

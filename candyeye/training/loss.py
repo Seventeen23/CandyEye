@@ -5,8 +5,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from core.modules.detect import make_anchors
-from training.assigner import TaskAlignedAssigner
+from candyeye.core.modules.detect import make_anchors
+from candyeye.training.assigner import TaskAlignedAssigner
 
 
 def bbox_ciou(box1: torch.Tensor, box2: torch.Tensor,

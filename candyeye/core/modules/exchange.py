@@ -24,7 +24,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from core.modules.conv import Conv, DWConv
+from candyeye.core.modules.conv import Conv, DWConv
 
 _GATE_MODES = ("none", "static", "dynamic")
 

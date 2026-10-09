@@ -24,6 +24,9 @@ the shared anchor-free parallel `Detect` head (see Phase 9).
 
 - [x] venv + CPU-only PyTorch + deps installed
 - [x] `pyproject.toml`, `configs/default.yaml`, `.gitignore`
+- [x] Pip-installable `candyeye/` package: public API (`CandyEye`, `train`,
+  `CandyEyePredictor`), bundled architecture configs + clean `yolo11n` weights
+  as package data, CPU-first training defaults, no repo-root paths required
 - [x] `scripts/download_voc.py` (download / extract / verify / cleanup)
 - [x] `data/voc.py` — `VOCDataset` (XML parse, clamp, drop degenerate)
 - [x] Run download, verify `trainval=5011` / `test=4952`

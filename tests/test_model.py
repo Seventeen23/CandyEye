@@ -5,7 +5,7 @@ Run:  PYTHONPATH=. venv/bin/python -m pytest tests/test_model.py -q
 import torch
 import pytest
 
-from core import CandyEye
+from candyeye.core import CandyEye
 
 CFG = "configs/yolo11.yaml"
 

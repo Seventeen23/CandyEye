@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import torch
 
-from data.transforms import letterbox
+from candyeye.data.transforms import letterbox
 
 
 VOC_CLASSES = (

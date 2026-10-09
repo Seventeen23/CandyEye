@@ -9,8 +9,8 @@ import torch
 import yaml
 from torchvision.ops import batched_nms
 
-from core.convert_yolo11 import load_official_state_dict, load_weights
-from core import CandyEye
+from candyeye.core.convert_yolo11 import load_official_state_dict, load_weights
+from candyeye.core import CandyEye
 
 # ---------------------------------------------------------------------------
 # Class names.  nc=20 -> PASCAL VOC order; nc=80 -> COCO order (as in the
@@ -131,7 +131,7 @@ class CandyEyePredictor:
     VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
     def __init__(self, weights: str | Path, *, data: str | Path | None = None,
-                 cfg: str | Path = "configs/yolo11.yaml", imgsz: int | None = None,
+                 cfg: str | Path | dict | None = None, imgsz: int | None = None,
                  nc: int | None = None, output_dir: str | Path = "runs/predict"):
         self.weights = Path(weights)
         self.output_dir = Path(output_dir)

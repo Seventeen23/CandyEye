@@ -5,8 +5,8 @@ import cv2
 import numpy as np
 import torch
 
-from data.transforms import RandomHorizontalFlip, letterbox
-from data.voc import VOCDataset, collate_fn
+from candyeye.data.transforms import RandomHorizontalFlip, letterbox
+from candyeye.data.voc import VOCDataset, collate_fn
 
 
 def test_letterbox_resizes_and_offsets_xyxy_boxes():
@@ -21,7 +21,7 @@ def test_letterbox_resizes_and_offsets_xyxy_boxes():
 
 
 def test_horizontal_flip_updates_box_coordinates(monkeypatch):
-    monkeypatch.setattr("data.transforms.random.random", lambda: 0.0)
+    monkeypatch.setattr("candyeye.data.transforms.random.random", lambda: 0.0)
     image = np.arange(2 * 10 * 3, dtype=np.uint8).reshape(2, 10, 3)
     boxes = np.array([[1, 0, 5, 2]], dtype=np.float32)
     labels = np.array([3], dtype=np.int64)

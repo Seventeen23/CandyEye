@@ -3,11 +3,11 @@ import cv2
 import numpy as np
 import pytest
 import torch
-from data.yolo import YoloTxtDataset, label_path
-from data.voc import collate_fn
-from training.trainer import _resolve_data
-from core import CandyEye
-import training.trainer as trainer
+from candyeye.data.yolo import YoloTxtDataset, label_path
+from candyeye.data.voc import collate_fn
+from candyeye.training.trainer import _resolve_data
+from candyeye.core import CandyEye
+import candyeye.training.trainer as trainer
 
 
 def _write_image_and_label(root, name="sample"):

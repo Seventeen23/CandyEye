@@ -24,11 +24,12 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from core.functions.layer_utils import make_divisible
-from core.modules.blocks import Attention, Bottleneck, C2PSA, C3k, C3k2, PSABlock, SPPF
-from core.modules.conv import Conv
-from core.modules.detect import Detect
-from core.modules.exchange import ScaleExchange
+from candyeye.core.functions.layer_utils import make_divisible
+from candyeye.core.modules.blocks import Attention, Bottleneck, C2PSA, C3k, C3k2, PSABlock, SPPF
+from candyeye.core.modules.conv import Conv
+from candyeye.core.modules.detect import Detect
+from candyeye.core.modules.exchange import ScaleExchange
+from candyeye.paths import resolve_config
 
 
 class Concat(nn.Module):
@@ -150,15 +151,15 @@ def parse_model(data: dict) -> nn.Sequential:
 class CandyEye(nn.Module):
     """CandyEye detector: YAML-built graph and anchor-free Detect head."""
 
-    def __init__(self, cfg: str = "configs/yolo11.yaml", nc: int | None = None, img_size: int = 128):
+    def __init__(self, cfg=None, nc: int | None = None, img_size: int = 128):
         super().__init__()
-        as_dict = cfg if isinstance(cfg, dict) else None
-        data = as_dict or self._load_yaml(cfg)
+        resolved = cfg if isinstance(cfg, dict) else resolve_config(cfg)
+        data = copy.deepcopy(resolved) if isinstance(resolved, dict) else self._load_yaml(resolved)
         if nc is not None:
             data["nc"] = nc
         self.model = parse_model(data)
         self.nc = self.model[-1].nc
-        self.yaml = cfg
+        self.yaml = resolved
         self.img_size = img_size
         if img_size % 32:
             raise ValueError(f"img_size must be divisible by 32, got {img_size}")
@@ -261,7 +262,7 @@ class CandyEye(nn.Module):
         """
         if data is None:
             return super().train(mode)
-        from training.trainer import train_model
+        from candyeye.training.trainer import train_model
 
         return train_model(
             self, data=data, epochs=epochs, imgsz=imgsz or self.img_size,
@@ -283,7 +284,7 @@ class CandyEye(nn.Module):
         can copy the official fp32 weights 1:1.  Numerical parity with the
         official export is then exact, not "fp16 checkpoint drift" close.
         """
-        from core.modules.conv import Conv
+        from candyeye.core.modules.conv import Conv
 
         self.eval()
         for m in self.modules():

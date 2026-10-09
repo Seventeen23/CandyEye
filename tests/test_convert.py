@@ -18,11 +18,11 @@ import onnxruntime as ort
 import torch
 import pytest
 
-from core.convert_yolo11 import (
+from candyeye.core.convert_yolo11 import (
     EXPECTED_NC20_SKIPPED, EXPECTED_FUSED_NC20_SKIPPED,
     load_official_state_dict, load_weights, load_fused_from_onnx,
 )
-from core import CandyEye
+from candyeye.core import CandyEye
 
 CFG = "configs/yolo11.yaml"
 WEIGHTS = "weights/yolo11n.pth"

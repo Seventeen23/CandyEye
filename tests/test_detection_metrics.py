@@ -3,7 +3,7 @@ import pytest
 import torch
 from torch import nn
 
-from eval.detection_metrics import evaluate_detector
+from candyeye.eval.detection_metrics import evaluate_detector
 
 
 class FixedPredictions(nn.Module):

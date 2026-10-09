@@ -20,11 +20,11 @@ import cv2
 import torch
 import yaml
 
-from data.voc import VOCDataset, VOC_CLASSES
-from data.yolo import YoloTxtDataset
-from eval.map import evaluate_map
-from inference.predict import predict
-from training.trainer import build_experiment_model
+from candyeye.data.voc import VOCDataset, VOC_CLASSES
+from candyeye.data.yolo import YoloTxtDataset
+from candyeye.eval.map import evaluate_map
+from candyeye.inference.predict import predict
+from candyeye.training.trainer import build_experiment_model
 
 _SPLIT_KEYS = {"train": "train_images", "val": "val_images",
                "valid": "val_images", "test": "test_images"}

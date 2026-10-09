@@ -1,9 +1,9 @@
 """Acceptance tests for TAL assignment and CandyEye's detection objective."""
 import torch
 
-from core import CandyEye
-from training.assigner import TaskAlignedAssigner
-from training.loss import DetectionLoss
+from candyeye.core import CandyEye
+from candyeye.training.assigner import TaskAlignedAssigner
+from candyeye.training.loss import DetectionLoss
 
 
 def test_assigner_no_ground_truth_returns_empty_foreground():

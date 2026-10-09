@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from data.voc import VOCDataset, VOC_CLASSES
+from candyeye.data.voc import VOCDataset, VOC_CLASSES
 
 ROOT = "data/VOCdevkit"
 OUT = Path("runs/inspect_data.jpg")

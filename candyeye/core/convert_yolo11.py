@@ -1,10 +1,11 @@
 """Load the official YOLO11n weights (nc=80) into our model.
 
-Reads the *clean* state_dict produced by ``scripts/bootstrap_weights.py``
-(``weights/yolo11n.pth``, plain tensors only — no ultralytics dependency).
-The loader is shape-checked: any tensor whose shape doesn't match is skipped
-and reported, everything else is copied 1:1 (parameters *and* buffers such as
-BatchNorm running statistics, so eval-mode inference is faithful).
+Reads a *clean* state_dict (plain tensors only — no ultralytics dependency).
+By default it uses the wheel's bundled ``assets/yolo11n.pth``; pass an explicit
+path to override.  The loader is shape-checked: any tensor whose shape doesn't
+match is skipped and reported, everything else is copied 1:1 (parameters *and*
+buffers such as BatchNorm running statistics, so eval-mode inference is
+faithful).
 
 Two load scenarios:
 - ``CandyEye(yaml, nc=80)``   — exact full load: 0 missing / 0 unexpected.
@@ -16,10 +17,12 @@ Two load scenarios:
 """
 from __future__ import annotations
 
-import torch
-import onnx
+from pathlib import Path
 
-WEIGHTS = "weights/yolo11n.pth"
+import torch
+
+from candyeye.paths import default_weights_path
+
 ONNX_PATH = "tmp/yolo11n.onnx"  # official fp32 export (BN fused)
 
 # The official checkpoint was trained with nc=80 (COCO), our training model
@@ -49,8 +52,14 @@ EXPECTED_NC20_SKIPPED = frozenset(
 )
 
 
-def load_official_state_dict(path: str = WEIGHTS) -> dict[str, torch.Tensor]:
-    """Read the clean .pth (tensors only -> safe with torch.load defaults)."""
+def load_official_state_dict(path: str | Path | None = None) -> dict[str, torch.Tensor]:
+    """Read the clean .pth (tensors only -> safe with torch.load defaults).
+
+    Defaults to the bundled ``assets/yolo11n.pth`` so callers can load the
+    default weights without knowing the package location.
+    """
+    if path is None:
+        path = default_weights_path()
     sd = torch.load(path, map_location="cpu")
     if not (isinstance(sd, dict) and all(isinstance(v, torch.Tensor) for v in sd.values())):
         raise TypeError(f"{path} is not a clean state_dict of tensors "
@@ -139,6 +148,8 @@ def load_fused_from_onnx(path: str = ONNX_PATH) -> dict[str, torch.Tensor]:
     that has been ``CandyEye(...).fuse()``d — the key set then matches 1:1
     (``model.0.conv.weight`` + ``model.0.conv.bias``, no ``.bn.*``).
     """
+    import onnx
+
     model = onnx.load(path)
     return {
         init.name: torch.tensor(onnx.numpy_helper.to_array(init), dtype=torch.float32)

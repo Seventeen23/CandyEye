@@ -12,7 +12,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from core.modules.conv import Conv
+from candyeye.core.modules.conv import Conv
 
 
 class Bottleneck(nn.Module):

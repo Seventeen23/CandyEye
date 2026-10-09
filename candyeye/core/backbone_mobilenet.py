@@ -6,10 +6,10 @@ from torch import nn
 import torch.nn.functional as F
 from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
 
-from core.modules.blocks import C3k2
-from core.modules.conv import Conv
-from core.modules.detect import Detect
-from core.modules.exchange import ScaleExchange
+from candyeye.core.modules.blocks import C3k2
+from candyeye.core.modules.conv import Conv
+from candyeye.core.modules.detect import Detect
+from candyeye.core.modules.exchange import ScaleExchange
 
 
 class MobileNetV3SmallDetector(nn.Module):

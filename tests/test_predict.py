@@ -2,8 +2,8 @@
 import numpy as np
 import torch
 
-from core import CandyEye
-from inference.predict import CandyEyePredictor, letterbox
+from candyeye.core import CandyEye
+from candyeye.inference.predict import CandyEyePredictor, letterbox
 
 
 def test_letterbox_survives_extreme_aspect_ratio():

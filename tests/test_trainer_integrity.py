@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import pytest
 
-import training.trainer as trainer
+import candyeye.training.trainer as trainer
 
 
 def _tiny_config(tmp_path, *, names=("a", "b"), nc=2):

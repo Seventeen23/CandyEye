@@ -2,10 +2,10 @@
 import pytest
 import torch
 
-from core.backbone_mobilenet import MobileNetV3SmallDetector
-from core import CandyEye
-from training.loss import DetectionLoss
-from training.trainer import lr_factor
+from candyeye.core.backbone_mobilenet import MobileNetV3SmallDetector
+from candyeye.core import CandyEye
+from candyeye.training.loss import DetectionLoss
+from candyeye.training.trainer import lr_factor
 
 
 def test_warmup_cosine_schedule_boundaries():
@@ -28,9 +28,9 @@ def test_mobilenet_detector_outputs_and_loss():
 
 
 def test_yolo_train_dispatches_to_high_level_api(monkeypatch, tmp_path):
-    import training.trainer as trainer
-    from core import CandyEye as PublicCandyEye
-    from core import train as train_entry
+    import candyeye.training.trainer as trainer
+    from candyeye.core import CandyEye as PublicCandyEye
+    from candyeye.core import train as train_entry
 
     assert PublicCandyEye.__name__ == "CandyEye"
 

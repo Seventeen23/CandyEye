@@ -14,7 +14,7 @@ import math
 import torch
 from torch import nn
 
-from core.functions.layer_utils import autopad
+from candyeye.core.functions.layer_utils import autopad
 
 
 class Conv(nn.Module):

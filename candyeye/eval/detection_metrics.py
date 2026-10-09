@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torchvision.ops import batched_nms
 
-from eval.map import IOU_THRESHOLDS, box_iou_xyxy, evaluate_map
+from candyeye.eval.map import IOU_THRESHOLDS, box_iou_xyxy, evaluate_map
 
 
 def evaluate_detector(model, loader, *, num_classes: int, class_names=None,

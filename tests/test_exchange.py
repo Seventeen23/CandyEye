@@ -2,8 +2,8 @@
 import pytest
 import torch
 
-from core.candyeye import CandyEye
-from core.modules.exchange import ScaleExchange, _Gate
+from candyeye.core.candyeye import CandyEye
+from candyeye.core.modules.exchange import ScaleExchange, _Gate
 
 CFG = "configs/yolo11_exchange.yaml"
 

@@ -24,7 +24,7 @@ import torch
 import yaml
 from torch.utils.flop_counter import FlopCounterMode
 
-from training.trainer import build_experiment_model
+from candyeye.training.trainer import build_experiment_model
 
 
 def build_model(config_path: str | Path, checkpoint: str | Path | None = None):

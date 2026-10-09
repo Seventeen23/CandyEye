@@ -20,7 +20,7 @@ import math
 import torch
 from torch import nn
 
-from core.modules.conv import Conv, DWConv
+from candyeye.core.modules.conv import Conv, DWConv
 
 
 class DFL(nn.Module):

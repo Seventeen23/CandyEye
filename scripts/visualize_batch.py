@@ -8,8 +8,8 @@ import cv2
 import numpy as np
 from torch.utils.data import DataLoader
 
-from data.transforms import Compose, HSVJitter, RandomHorizontalFlip
-from data.voc import VOCDataset, VOC_CLASSES, collate_fn
+from candyeye.data.transforms import Compose, HSVJitter, RandomHorizontalFlip
+from candyeye.data.voc import VOCDataset, VOC_CLASSES, collate_fn
 
 
 def main():

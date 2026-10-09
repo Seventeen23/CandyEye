@@ -2,7 +2,7 @@
 import numpy as np
 import torch
 
-from training.assigner import TaskAlignedAssigner
+from candyeye.training.assigner import TaskAlignedAssigner
 
 
 def _grid():

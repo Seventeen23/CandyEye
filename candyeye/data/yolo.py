@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import torch
 
-from data.transforms import letterbox
+from candyeye.data.transforms import letterbox
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}

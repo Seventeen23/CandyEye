@@ -68,10 +68,12 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
    `data/VOCdevkit/VOC2007/ImageSets/Main/trainval.txt` (matches download
    output).
 
-3. ~~**Editable install exposes nothing.**~~ **RESOLVED (won't fix)** —
-   decision 2026-10-07: flat layout stays (`data/`, `core/`, … top-level,
-   no `__init__.py`), run from repo root with `PYTHONPATH=.`, `pyproject.toml`
-   left as-is. Scripts are always launched from the repo root anyway.
+3. ~~**Editable install exposes nothing.**~~ **FIXED (reversed 2026-10-09)** —
+   decision reversed: code now lives in an installable `candyeye/` package
+   (`import candyeye`; public API `CandyEye`, `train`, `CandyEyePredictor`).
+   Default architecture configs and clean `yolo11n` weights are bundled as
+   package data, resolved via `candyeye/paths.py`, so training runs without a
+   repo checkout or repo-root paths.
 
 4. ~~**`CandyEye.egg-info/` is tracked in git.**~~ **FIXED** — untracked via
    `git rm -r --cached`, ignored via `*.egg-info/` (files remain on disk).
