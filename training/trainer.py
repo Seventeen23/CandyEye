@@ -37,6 +37,15 @@ def _save_training_plots(metrics_path: Path, output: Path) -> Path | None:
         rows = list(csv.DictReader(stream))
     if not rows:
         return None
+    required = {"epoch", "lr", "train_loss", "val_loss",
+                "train_box", "val_box", "train_cls", "val_cls",
+                "train_dfl", "val_dfl",
+                "precision_macro", "recall_macro", "f1_macro", "map50"}
+    missing = required - set(rows[0])
+    if missing:
+        print(f"Plots skipped: metrics schema lacks {sorted(missing)} columns",
+              flush=True)
+        return None
     epochs = [int(row["epoch"]) for row in rows]
     fig, axes = plt.subplots(4, 1, figsize=(11, 15), sharex=True)
 
@@ -169,7 +178,8 @@ def build_experiment_model(config: dict, no_pretrained: bool = False):
 def run_training(config: dict, *, epochs: int | None = None,
                  max_batches: int | None = None, resume: str | None = None,
                  no_pretrained: bool = False, threads: int = 4,
-                 model=None, patience: int | None = None) -> Path:
+                 model=None, patience: int | None = None,
+                 exist_ok: bool = False) -> Path:
     train_cfg, data_cfg, model_cfg = config["train"], config["data"], config["model"]
     epochs = epochs or train_cfg["epochs"]
     if patience is None:
@@ -213,6 +223,12 @@ def run_training(config: dict, *, epochs: int | None = None,
             data_cfg.get("val_split", "test"), img_size=img_size,
         )
         class_names = VOC_CLASSES
+    if len(class_names) != model_nc:
+        raise ValueError(
+            f"model has nc={model_nc}, but the dataset provides "
+            f"{len(class_names)} class names; construct the model with "
+            "matching nc (or fix the dataset names)"
+        )
     loader = DataLoader(
         dataset, batch_size=int(data_cfg.get("batch_size", 16)), shuffle=True,
         num_workers=int(data_cfg.get("workers", 0)), collate_fn=collate_fn,
@@ -223,12 +239,16 @@ def run_training(config: dict, *, epochs: int | None = None,
         num_workers=int(data_cfg.get("workers", 0)), collate_fn=collate_fn,
         drop_last=False,
     )
-    steps_per_epoch = min(len(loader), max_batches) if max_batches else len(loader)
+    if max_batches is not None and max_batches < 1:
+        raise ValueError(f"max_batches must be >= 1, got {max_batches}")
+    steps_per_epoch = (len(loader) if max_batches is None
+                       else min(len(loader), max_batches))
     if steps_per_epoch <= 0:
         raise ValueError("training loader has no batches")
 
     criterion = DetectionLoss(model)
     base_lr = float(train_cfg.get("learning_rate", 2e-4))
+    lr = base_lr  # defined up front so the log row never sees an unbound name
     optimizer_name = str(train_cfg.get("optimizer", "adamw")).lower()
     optimizer_cls = torch.optim.AdamW if optimizer_name == "adamw" else torch.optim.SGD
     optimizer_kwargs = {"lr": base_lr,
@@ -239,6 +259,17 @@ def run_training(config: dict, *, epochs: int | None = None,
     warmup = float(train_cfg.get("warmup_epochs", 3))
     min_ratio = float(train_cfg.get("min_lr_ratio", .01))
     output = Path(train_cfg.get("output", f"runs/experiments/{config['name']}"))
+    # Re-running a config without --resume must not silently truncate the
+    # previous metrics.csv (or leave stale checkpoints beside a fresh log).
+    if resume is None and not exist_ok and (output / "metrics.csv").exists():
+        base, suffix = output.name, 2
+        while (output.parent / f"{base}{suffix}").exists():
+            suffix += 1
+        renamed = output.parent / f"{base}{suffix}"
+        print(f"output {output} already contains metrics.csv; using {renamed}")
+        output = renamed
+        config["name"] = output.name
+        config["train"]["output"] = str(output)
     output.mkdir(parents=True, exist_ok=True)
     log_path = output / "metrics.csv"
     start_epoch = 0
@@ -257,123 +288,166 @@ def run_training(config: dict, *, epochs: int | None = None,
         best_epoch = int(checkpoint.get("best_epoch", start_epoch))
         print(f"resumed {resume} at epoch {start_epoch}")
 
-    write_header = not log_path.exists() or not resume
-    with log_path.open("a" if resume else "w", newline="", encoding="utf-8") as csv_file:
-        log = csv.writer(csv_file)
-        if write_header:
-            class_columns = [column for name in class_names
-                             for column in (f"{name}/gt", f"{name}/precision",
-                                            f"{name}/recall", f"{name}/f1",
-                                            f"{name}/ap50")]
-            log.writerow(["epoch", "lr", "train_loss", "train_box", "train_cls",
-                          "train_dfl", "train_foreground", "val_loss", "val_box",
-                          "val_cls", "val_dfl",
-                          "val_foreground",
-                          "precision_macro", "recall_macro", "f1_macro",
-                          "precision_micro", "recall_micro", "f1_micro", "map50",
-                          *class_columns])
-        for epoch in range(start_epoch, epochs):
-            epoch_started = time.perf_counter()
-            model.train()
-            sums = np.zeros(5, dtype=np.float64)
-            for step, batch in enumerate(loader):
-                if max_batches is not None and step >= max_batches:
-                    break
-                progress = epoch + (step + 1) / steps_per_epoch
-                factor = lr_factor(progress, epochs, warmup, min_ratio)
-                lr = base_lr * factor
-                for group in optimizer.param_groups:
-                    group["lr"] = lr
-                images = batch["images"].to(device)
-                targets = batch["targets"].to(device)
-                optimizer.zero_grad(set_to_none=True)
-                losses = criterion(model(images), targets)
-                if not torch.isfinite(losses["loss"]):
-                    raise FloatingPointError(f"non-finite loss at epoch {epoch + 1}, step {step}")
-                losses["loss"].backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-                optimizer.step()
-                sums[:4] += [losses[k].item() for k in ("loss", "box", "cls", "dfl")]
-                sums[4] += losses["foreground"].item()
+    class_columns = [column for name in class_names
+                     for column in (f"{name}/gt", f"{name}/precision",
+                                    f"{name}/recall", f"{name}/f1",
+                                    f"{name}/ap50")]
+    header = ["epoch", "lr", "train_loss", "train_box", "train_cls",
+              "train_dfl", "train_foreground", "val_loss", "val_box",
+              "val_cls", "val_dfl",
+              "val_foreground",
+              "precision_macro", "recall_macro", "f1_macro",
+              "precision_micro", "recall_micro", "f1_micro", "map50",
+              *class_columns]
+    if not resume:
+        write_header = True
+    elif log_path.exists():
+        with log_path.open(newline="", encoding="utf-8") as existing:
+            existing_header = next(csv.reader(existing), None)
+        if existing_header == header:
+            write_header = False
+        else:
+            # Appending new-schema rows under an old header corrupts the file
+            # (and later crashes the plot step). Keep the old log aside.
+            if existing_header is not None:
+                rotated = log_path.with_name(
+                    f"metrics_prev_{time.strftime('%Y%m%d-%H%M%S')}.csv")
+                log_path.rename(rotated)
+                print(f"metrics.csv schema changed; rotated old log to {rotated.name}")
+            write_header = True
+    else:
+        write_header = True
+    completed = False
+    interrupted = False
+    try:
+        with log_path.open("a" if resume else "w", newline="", encoding="utf-8") as csv_file:
+            log = csv.writer(csv_file)
+            if write_header:
+                log.writerow(header)
+            for epoch in range(start_epoch, epochs):
+                epoch_started = time.perf_counter()
+                model.train()
+                sums = np.zeros(5, dtype=np.float64)
+                for step, batch in enumerate(loader):
+                    if max_batches is not None and step >= max_batches:
+                        break
+                    progress = epoch + (step + 1) / steps_per_epoch
+                    factor = lr_factor(progress, epochs, warmup, min_ratio)
+                    lr = base_lr * factor
+                    for group in optimizer.param_groups:
+                        group["lr"] = lr
+                    images = batch["images"].to(device)
+                    targets = batch["targets"].to(device)
+                    optimizer.zero_grad(set_to_none=True)
+                    losses = criterion(model(images), targets)
+                    if not torch.isfinite(losses["loss"]):
+                        raise FloatingPointError(f"non-finite loss at epoch {epoch + 1}, step {step}")
+                    losses["loss"].backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                    optimizer.step()
+                    sums[:4] += [losses[k].item() for k in ("loss", "box", "cls", "dfl")]
+                    sums[4] += losses["foreground"].item()
 
-            means = sums / steps_per_epoch
-            epoch_loss = float(means[0])
-            best_loss = min(best_loss, epoch_loss)
-            validation = evaluate_detector(
-                model, val_loader, num_classes=int(model_nc), class_names=class_names,
-                criterion=criterion,
-            )
-            val_loss = validation["val_loss"]
-            map50 = validation["map50"]
-            improved = (map50 > best_map50 + 1e-12 or
-                        (abs(map50 - best_map50) <= 1e-12 and
-                         val_loss["loss"] < best_val_loss))
-            if improved:
-                best_map50 = map50
-                best_val_loss = val_loss["loss"]
-                best_epoch = epoch + 1
-            class_values = [
-                field
-                for value in validation["per_class"].values()
-                for field in (
-                    value["ground_truth"],
-                    *(value[metric] if value[metric] is not None else "n/a"
-                      for metric in ("precision", "recall", "f1", "ap50")),
+                means = sums / steps_per_epoch
+                epoch_loss = float(means[0])
+                best_loss = min(best_loss, epoch_loss)
+                validation = evaluate_detector(
+                    model, val_loader, num_classes=int(model_nc), class_names=class_names,
+                    criterion=criterion,
                 )
-            ]
-            log.writerow([
-                epoch + 1, lr, *means[:4], means[4],
-                val_loss["loss"], val_loss["box"], val_loss["cls"], val_loss["dfl"],
-                val_loss["foreground"],
-                validation["precision"], validation["recall"], validation["f1"],
-                validation["micro_precision"], validation["micro_recall"],
-                validation["micro_f1"], map50, *class_values,
-            ])
-            csv_file.flush()
-            state = {"epoch": epoch + 1, "model": model.state_dict(),
-                     "optimizer": optimizer.state_dict(), "best_loss": best_loss,
-                     "best_map50": best_map50, "best_val_loss": best_val_loss,
-                     "best_epoch": best_epoch,
-                     "config": config}
-            torch.save(state, output / "last.pt")
-            if improved or not (output / "best.pt").exists():
-                torch.save(state, output / "best.pt")
-            elapsed = time.perf_counter() - epoch_started
-            marker = "  best" if improved else ""
-            print(
-                f"\nEpoch {epoch + 1:03d}/{epochs:03d}  "
-                f"{elapsed:5.1f}s  lr {lr:.2e}{marker}\n"
-                f"  Train  loss {epoch_loss:.4f} | box {means[1]:.4f}  "
-                f"cls {means[2]:.4f}  dfl {means[3]:.4f}\n"
-                f"  Val    loss {val_loss['loss']:.4f} | box {val_loss['box']:.4f}  "
-                f"cls {val_loss['cls']:.4f}  dfl {val_loss['dfl']:.4f}\n"
-                f"  Scores P {validation['precision']:.3f}  "
-                f"R {validation['recall']:.3f}  F1 {validation['f1']:.3f}  "
-                f"mAP50 {map50:.3f}", flush=True
-            )
-            if patience is not None and patience > 0 and epoch + 1 - best_epoch >= patience:
-                print(f"early stop: no validation mAP@0.5 improvement for {patience} epochs",
-                      flush=True)
-                break
-    best_checkpoint = output / "best.pt"
-    if best_checkpoint.exists():
-        best_state = torch.load(best_checkpoint, map_location=device, weights_only=False)
-        model.load_state_dict(best_state["model"])
-        best_validation = evaluate_detector(
-            model, val_loader, num_classes=int(model_nc), class_names=class_names,
-            conf_threshold=0.25, criterion=None, include_confusion_matrix=True,
-        )
-        matrix_csv, matrix_png = _save_confusion_matrix(
-            best_validation["confusion_matrix"],
-            best_validation["confusion_matrix_labels"], output,
-        )
-        plot_path = _save_training_plots(log_path, output)
-        print("\nTraining complete")
-        print(f"  Best checkpoint: {best_checkpoint} (epoch {best_state['epoch']})")
-        if plot_path:
-            print(f"  Training graphs: {plot_path}")
-        print(f"  Confusion matrix: {matrix_png or matrix_csv}")
-        print(f"  Epoch history: {log_path}", flush=True)
+                val_loss = validation["val_loss"]
+                map50 = validation["map50"]
+                improved = (map50 > best_map50 + 1e-12 or
+                            (abs(map50 - best_map50) <= 1e-12 and
+                             val_loss["loss"] < best_val_loss))
+                if improved:
+                    best_map50 = map50
+                    best_val_loss = val_loss["loss"]
+                    best_epoch = epoch + 1
+                class_values = [
+                    field
+                    for value in validation["per_class"].values()
+                    for field in (
+                        value["ground_truth"],
+                        *(value[metric] if value[metric] is not None else "n/a"
+                          for metric in ("precision", "recall", "f1", "ap50")),
+                    )
+                ]
+                log.writerow([
+                    epoch + 1, lr, *means[:4], means[4],
+                    val_loss["loss"], val_loss["box"], val_loss["cls"], val_loss["dfl"],
+                    val_loss["foreground"],
+                    validation["precision"], validation["recall"], validation["f1"],
+                    validation["micro_precision"], validation["micro_recall"],
+                    validation["micro_f1"], map50, *class_values,
+                ])
+                csv_file.flush()
+                state = {"epoch": epoch + 1, "model": model.state_dict(),
+                         "optimizer": optimizer.state_dict(), "best_loss": best_loss,
+                         "best_map50": best_map50, "best_val_loss": best_val_loss,
+                         "best_epoch": best_epoch,
+                         "config": config}
+                torch.save(state, output / "last.pt")
+                if improved or not (output / "best.pt").exists():
+                    torch.save(state, output / "best.pt")
+                elapsed = time.perf_counter() - epoch_started
+                marker = "  best" if improved else ""
+                print(
+                    f"\nEpoch {epoch + 1:03d}/{epochs:03d}  "
+                    f"{elapsed:5.1f}s  lr {lr:.2e}{marker}\n"
+                    f"  Train  loss {epoch_loss:.4f} | box {means[1]:.4f}  "
+                    f"cls {means[2]:.4f}  dfl {means[3]:.4f}\n"
+                    f"  Val    loss {val_loss['loss']:.4f} | box {val_loss['box']:.4f}  "
+                    f"cls {val_loss['cls']:.4f}  dfl {val_loss['dfl']:.4f}\n"
+                    f"  Scores P {validation['precision']:.3f}  "
+                    f"R {validation['recall']:.3f}  F1 {validation['f1']:.3f}  "
+                    f"mAP50 {map50:.3f}", flush=True
+                )
+                if patience is not None and patience > 0 and epoch + 1 - best_epoch >= patience:
+                    print(f"early stop: no validation mAP@0.5 improvement for {patience} epochs",
+                          flush=True)
+                    break
+        completed = True
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
+    finally:
+        best_checkpoint = output / "best.pt"
+        if interrupted:
+            _save_training_plots(log_path, output)
+            print("\nTraining interrupted; no final evaluation was run", flush=True)
+        elif best_checkpoint.exists():
+            best_epoch_note = ""
+            try:
+                best_state = torch.load(best_checkpoint, map_location=device,
+                                        weights_only=False)
+                model.load_state_dict(best_state["model"])
+                best_epoch_note = f" (epoch {best_state['epoch']})"
+                best_validation = evaluate_detector(
+                    model, val_loader, num_classes=int(model_nc),
+                    class_names=class_names,
+                    conf_threshold=0.25, criterion=None,
+                    include_confusion_matrix=True,
+                )
+                matrix_csv, matrix_png = _save_confusion_matrix(
+                    best_validation["confusion_matrix"],
+                    best_validation["confusion_matrix_labels"], output,
+                )
+            except Exception as exc:
+                matrix_csv = matrix_png = None
+                print(f"final evaluation skipped: {exc}", flush=True)
+            plot_path = _save_training_plots(log_path, output)
+            print("\nTraining complete" if completed else
+                  "\nTraining stopped early; artifacts below")
+            print(f"  Best checkpoint: {best_checkpoint}{best_epoch_note}")
+            if plot_path:
+                print(f"  Training graphs: {plot_path}")
+            if matrix_png or matrix_csv:
+                print(f"  Confusion matrix: {matrix_png or matrix_csv}")
+            print(f"  Epoch history: {log_path}", flush=True)
+        else:
+            print("\nNo checkpoint was produced "
+                  "(training ended before epoch 1 finished)", flush=True)
     return output
 
 
@@ -533,12 +607,15 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
     config["train"]["patience"] = patience
     result_dir = run_training(config, epochs=epochs, max_batches=max_batches,
                               resume=str(resume_path) if resume_path else None,
-                              threads=threads, model=model, patience=patience)
+                              threads=threads, model=model, patience=patience,
+                              exist_ok=exist_ok)
+    def existing(path: Path) -> Path | None:
+        return path if path.exists() else None
     return {"save_dir": result_dir, "best": result_dir / "best.pt",
             "last": result_dir / "last.pt", "results": result_dir / "metrics.csv",
-            "plots": result_dir / "results.png",
-            "confusion_matrix": result_dir / "confusion_matrix.png",
-            "confusion_matrix_csv": result_dir / "confusion_matrix.csv"}
+            "plots": existing(result_dir / "results.png"),
+            "confusion_matrix": existing(result_dir / "confusion_matrix.png"),
+            "confusion_matrix_csv": existing(result_dir / "confusion_matrix.csv")}
 
 
 def train(model: str | Path | dict = "configs/yolo11.yaml", *, data,
@@ -554,6 +631,8 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, help="override configured epoch count")
     parser.add_argument("--max-batches", type=int, help="limit batches per epoch (smoke runs)")
     parser.add_argument("--resume", type=str, help="resume from last/best checkpoint")
+    parser.add_argument("--exist-ok", action="store_true",
+                        help="overwrite an existing run directory instead of renaming it")
     parser.add_argument("--no-pretrained", action="store_true",
                         help="skip optional ImageNet initialization (offline smoke runs)")
     parser.add_argument("--threads", type=int, default=4)
@@ -562,7 +641,7 @@ def main() -> int:
         config = yaml.safe_load(f)
     output = run_training(config, epochs=args.epochs, max_batches=args.max_batches,
                           resume=args.resume, no_pretrained=args.no_pretrained,
-                          threads=args.threads)
+                          threads=args.threads, exist_ok=args.exist_ok)
     print(f"training complete: {output}")
     return 0
 

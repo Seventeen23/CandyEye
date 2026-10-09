@@ -37,3 +37,20 @@ def test_detection_on_difficult_object_is_ignored():
 
     assert aps[0] == pytest.approx(1.0)
     assert mean_ap == pytest.approx(1.0)
+
+
+def test_out_of_range_detection_class_raises():
+    gt = {"image": {"boxes": [[0, 0, 10, 10]], "labels": [0]}}
+    detections = [
+        {"image_id": "image", "class_id": 3, "score": .9, "box": [0, 0, 10, 10]},
+    ]
+
+    with pytest.raises(ValueError, match="num_classes mismatch"):
+        evaluate_map50(gt, detections, num_classes=2)
+
+
+def test_out_of_range_gt_label_raises():
+    gt = {"image": {"boxes": [[0, 0, 10, 10]], "labels": [7]}}
+
+    with pytest.raises(ValueError, match="class ids"):
+        evaluate_map50(gt, [], num_classes=2)

@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pytest
 import torch
-from data.yolo import YoloTxtDataset
+from data.yolo import YoloTxtDataset, label_path
 from data.voc import collate_fn
 from training.trainer import _resolve_data
 from core import CandyEye
@@ -75,3 +75,40 @@ def test_train_reads_yaml_and_resizes_class_head_automatically(tmp_path, monkeyp
     assert model.model[-1].nc == 2
     assert [feature.shape[1] for feature in model(torch.zeros(1, 3, 64, 64))] == [66] * 3
     assert results["best"] == tmp_path / "run" / "best.pt"
+
+
+def test_label_path_falls_back_without_images_dir(tmp_path):
+    train = tmp_path / "train"
+    (train / "labels").mkdir(parents=True)
+    image = train / "foo.jpg"
+    image.write_bytes(b"")
+    expected = train / "labels" / "foo.txt"
+    expected.write_text("0 .5 .5 .1 .1\n", encoding="utf-8")
+
+    # No "images" component: parent.parent/labels is wrong here.
+    assert label_path(image) == expected
+
+
+def test_label_path_prefers_images_to_labels_mapping(tmp_path):
+    images = tmp_path / "train" / "images"
+    labels = tmp_path / "train" / "labels"
+    images.mkdir(parents=True)
+    labels.mkdir(parents=True)
+    image = images / "foo.jpg"
+    image.write_bytes(b"")
+    primary = labels / "foo.txt"
+    primary.write_text("0 .5 .5 .1 .1\n", encoding="utf-8")
+    # Decoy in the parent.parent layout must not win.
+    (tmp_path / "labels").mkdir()
+    (tmp_path / "labels" / "foo.txt").write_text("1 .5 .5 .1 .1\n", encoding="utf-8")
+
+    assert label_path(image) == primary
+
+
+def test_dataset_raises_when_no_labels_anywhere(tmp_path):
+    images = tmp_path / "train" / "images"
+    images.mkdir(parents=True)
+    cv2.imwrite(str(images / "foo.jpg"), np.zeros((10, 10, 3), np.uint8))
+
+    with pytest.raises(ValueError, match="no label files"):
+        YoloTxtDataset(images, img_size=32)

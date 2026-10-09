@@ -43,14 +43,26 @@ def image_paths(source: str | Path | list[str | Path]) -> list[Path]:
 
 
 def label_path(image_path: Path) -> Path:
-    """Map ``.../images/foo.jpg`` to ``.../labels/foo.txt``."""
+    """Map an image path to its YOLO label file across common layouts.
+
+    Tries ``.../images/foo.jpg`` → ``.../labels/foo.txt``, a sibling ``labels``
+    directory next to the parent, and a ``labels`` directory inside the parent.
+    Returns the first candidate that exists, otherwise the primary mapping so
+    callers can treat the image as background.
+    """
     parts = list(image_path.parts)
+    candidates = []
     image_dirs = [i for i, part in enumerate(parts[:-1]) if part.lower() == "images"]
     if image_dirs:
-        i = image_dirs[-1]
-        parts[i] = "labels"
-        return Path(*parts).with_suffix(".txt")
-    return image_path.parent.parent / "labels" / f"{image_path.stem}.txt"
+        replaced = list(parts)
+        replaced[image_dirs[-1]] = "labels"
+        candidates.append(Path(*replaced).with_suffix(".txt"))
+    candidates.append(image_path.parent.parent / "labels" / f"{image_path.stem}.txt")
+    candidates.append(image_path.parent / "labels" / f"{image_path.stem}.txt")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
 
 
 class YoloTxtDataset(torch.utils.data.Dataset):
@@ -68,6 +80,19 @@ class YoloTxtDataset(torch.utils.data.Dataset):
         self.transform = transform
         self.mosaic_probability = mosaic_probability
         self.num_classes = num_classes
+        # A wrong images→labels mapping would silently turn the whole dataset
+        # into background images; fail loudly instead.
+        found = sum(1 for path in self.images if label_path(path).is_file())
+        if self.images and found == 0:
+            raise ValueError(
+                f"no label files found for {len(self.images)} images "
+                f"(e.g. expected {label_path(self.images[0])}); "
+                "check the dataset's images/labels layout"
+            )
+        if found < len(self.images):
+            print(f"warning: {len(self.images) - found}/{len(self.images)} "
+                  "images have no label file (treated as background)",
+                  flush=True)
 
     def __len__(self):
         return len(self.images)

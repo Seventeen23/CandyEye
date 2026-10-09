@@ -47,7 +47,7 @@ def letterbox(im_bgr: np.ndarray, size: int = 128, color=114):
     """
     h, w = im_bgr.shape[:2]
     scale = min(size / h, size / w)
-    nh, nw = int(round(h * scale)), int(round(w * scale))
+    nh, nw = max(1, int(round(h * scale))), max(1, int(round(w * scale)))
     out = np.full((size, size, 3), color, dtype=np.uint8)
     top, left = (size - nh) // 2, (size - nw) // 2
     out[top: top + nh, left: left + nw] = cv2.resize(
@@ -131,17 +131,20 @@ class CandyEyePredictor:
     VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
     def __init__(self, weights: str | Path, *, data: str | Path | None = None,
-                 cfg: str | Path = "configs/yolo11.yaml", imgsz: int = 128,
+                 cfg: str | Path = "configs/yolo11.yaml", imgsz: int | None = None,
                  nc: int | None = None, output_dir: str | Path = "runs/predict"):
         self.weights = Path(weights)
         self.output_dir = Path(output_dir)
-        self.imgsz = imgsz
         if self.weights.suffix.lower() == ".pt":
             payload = torch.load(self.weights, map_location="cpu", weights_only=False)
             state = payload.get("model", payload) if isinstance(payload, dict) else payload
             saved_config = payload.get("config", {}) if isinstance(payload, dict) else {}
         else:
             state, saved_config = None, {}
+        # Predictions must letterbox at the size the checkpoint was trained
+        # with unless the caller explicitly overrides it.
+        self.imgsz = int(imgsz if imgsz is not None
+                         else saved_config.get("model", {}).get("img_size", 128))
 
         data_config = {}
         if data is not None:
@@ -165,7 +168,7 @@ class CandyEyePredictor:
             raise ValueError(f"dataset YAML has nc={data_nc}, but model has nc={self.nc}")
         self.names = names
 
-        self.model = CandyEye(cfg, nc=self.nc, img_size=imgsz)
+        self.model = CandyEye(cfg, nc=self.nc, img_size=self.imgsz)
         if state is not None:
             self.model.load_state_dict(state)
         else:

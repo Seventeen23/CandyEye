@@ -57,6 +57,28 @@ def test_collate_stacks_images_and_normalizes_targets():
     )
 
 
+def test_collate_carries_difficult_flags_per_image():
+    batch = [
+        {"image": np.zeros((8, 8, 3), np.uint8),
+         "boxes": np.array([[2, 2, 6, 6], [0, 0, 4, 4]], np.float32),
+         "labels": np.array([4, 5]),
+         "difficult": np.array([False, True]),
+         "img_id": "a"},
+        # No difficult key: must fall back to an all-easy array.
+        {"image": np.zeros((8, 8, 3), np.uint8),
+         "boxes": np.zeros((0, 4), np.float32),
+         "labels": np.zeros((0,), np.int64), "img_id": "b"},
+    ]
+
+    packed = collate_fn(batch)
+
+    assert "difficult" in packed
+    torch.testing.assert_close(
+        packed["difficult"][0], torch.tensor([False, True])
+    )
+    assert packed["difficult"][1].numel() == 0
+
+
 def _write_voc_fixture(root):
     voc = root / "VOC2007"
     (voc / "JPEGImages").mkdir(parents=True)

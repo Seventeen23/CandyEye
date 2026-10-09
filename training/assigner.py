@@ -67,10 +67,12 @@ class TaskAlignedAssigner(nn.Module):
             positives = topk_mask & in_gt
 
             # An anchor selected by overlapping GTs belongs to the one with
-            # highest IoU, matching the usual TAL conflict resolution.
+            # highest IoU among the GTs that actually claimed it. Only
+            # considering claiming GTs keeps the assignment inside a box
+            # containing the anchor (positives ⊆ in_gt).
             multi = positives.sum(0) > 1
             if multi.any():
-                best = ious.argmax(0)
+                best = ious.masked_fill(~positives, -1).argmax(0)
                 positives[:, multi] = False
                 positives[best[multi], multi] = True
 
@@ -86,9 +88,15 @@ class TaskAlignedAssigner(nn.Module):
             fg_mask[b] = assigned
 
             # Normalize alignment per GT, retaining IoU as the target quality.
-            max_metric = metric.masked_fill(~positives, 0).amax(1, keepdim=True)
+            # Mask the numerator to the final positives first: a GT that
+            # contains the anchor but never claimed it must not contribute
+            # (its metric would otherwise be compared against another GT's
+            # normalization and could win the max, attaching a score computed
+            # from a different class/box than the one assigned).
+            metric_pos = metric.masked_fill(~positives, 0)
+            max_metric = metric_pos.amax(1, keepdim=True)
             max_iou = ious.masked_fill(~positives, 0).amax(1, keepdim=True)
-            quality = (metric * max_iou / (max_metric + self.eps)).amax(0)
+            quality = (metric_pos * max_iou / (max_metric + self.eps)).amax(0)
             # Scratch initialization can produce almost-zero IoUs. Keeping a
             # minimum positive target prevents box/class gradients from
             # vanishing before the detector learns its first useful boxes.

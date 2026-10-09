@@ -1,7 +1,7 @@
 data:
   root: data/VOCdevkit
   train_split: trainval
-  val_split: test
+  val_split: test # selects best.pt; use a held-out split for unbiased benchmarks
 model:
   img_size: 128 # Divisible by 32
   nc: 20

@@ -188,8 +188,15 @@ class CandyEye(nn.Module):
 
     def _detect_stride(self, img_size: int) -> torch.Tensor:
         """Feed a blank image and infer P3/P4/P5 strides from output sizes."""
-        with torch.no_grad():
-            feats = self(torch.zeros(1, 3, img_size, img_size))
+        was_training = self.training
+        self.eval()  # BatchNorm train mode rejects 1x1 feature maps (img_size=32)
+        try:
+            with torch.no_grad():
+                # decode=False: raw per-level maps regardless of train/eval.
+                feats = self(torch.zeros(1, 3, img_size, img_size), decode=False)
+        finally:
+            if was_training:
+                self.train()
         if not isinstance(feats, (list, tuple)):
             return torch.ones(1)
         return torch.tensor([img_size / f.shape[-2] for f in feats])

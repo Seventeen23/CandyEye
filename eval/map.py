@@ -38,6 +38,25 @@ def evaluate_map50(ground_truth: dict, detections: list[dict],
     Returns ``(mean_ap, per_class_ap)``. Classes without non-difficult GT are
     reported as ``None`` and excluded from the mean, as in VOC evaluation.
     """
+    # Out-of-range class ids would be silently dropped by the per-class loop:
+    # detections vanish (no false positive) and GT vanishes (no missed object),
+    # inflating mAP. Fail loudly instead — this always means an nc mismatch
+    # between the model, the dataset, and the evaluator.
+    bad_ids = set()
+    for entry in ground_truth.values():
+        bad_ids.update(
+            int(label) for label in np.asarray(entry["labels"], dtype=np.int64)
+            if not 0 <= int(label) < num_classes
+        )
+    bad_ids.update(
+        int(det["class_id"]) for det in detections
+        if not 0 <= int(det["class_id"]) < num_classes
+    )
+    if bad_ids:
+        raise ValueError(
+            f"class ids {sorted(bad_ids)} outside 0..{num_classes - 1}: "
+            "model/dataset num_classes mismatch"
+        )
     class_ap = {}
     valid_aps = []
     for class_id in range(num_classes):

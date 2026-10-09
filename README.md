@@ -91,6 +91,12 @@ or pass a checkpoint path. `imgsz` must be divisible by 32. Detection
 “accuracy” is not a standard object-detection metric, so use precision, recall,
 F1, and AP/mAP to assess the model.
 
+> **Note on `val_split: test`:** by default the trainer validates (and selects
+> `best.pt`) on the VOC **test** split, so model selection sees the test set and
+> reported test numbers are mildly optimistic. This default is kept for
+> convenience; for an unbiased benchmark set `val_split` to a held-out split
+> (e.g. `train`) in your data config.
+
 The console prints a compact summary for each epoch. At the end of training,
 the run directory also contains `results.png` (total/component losses,
 validation metrics, and

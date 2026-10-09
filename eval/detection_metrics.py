@@ -61,9 +61,20 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
                     else:
                         gt_boxes = np.zeros((0, 4), dtype=np.float32)
                         gt_labels = np.zeros((0,), dtype=np.int64)
+                    batch_difficult = batch.get("difficult")
+                    if batch_difficult is not None:
+                        difficult = np.asarray(
+                            batch_difficult[batch_index], dtype=np.bool_
+                        ).reshape(-1)
+                        # Keep only rows that survived into `target` (they are
+                        # appended in sample order, so lengths must agree).
+                        if len(difficult) != len(gt_labels):
+                            difficult = np.zeros(len(gt_labels), dtype=np.bool_)
+                    else:
+                        difficult = np.zeros(len(gt_labels), dtype=np.bool_)
                     ground_truth[image_id] = {
                         "boxes": gt_boxes, "labels": gt_labels,
-                        "difficult": np.zeros(len(gt_labels), dtype=np.bool_),
+                        "difficult": difficult,
                     }
 
                     pred = predictions[batch_index]
@@ -98,13 +109,22 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
 
                     # Match detections to ground truth by IoU, regardless of
                     # class, so a wrong class is shown as an off-diagonal cell.
+                    # Difficult objects follow VOC: detections on them are
+                    # ignored, and they never count as misses.
                     if confusion_matrix is not None:
+                        easy = ~difficult
                         pairs = []
+                        ignored_detections = set()
                         for det_index, detection in enumerate(image_detections):
                             ious = box_iou_xyxy(detection["box"], gt_boxes)
+                            if len(ious):
+                                best = int(ious.argmax())
+                                if ious[best] >= iou_threshold and difficult[best]:
+                                    ignored_detections.add(det_index)
+                                    continue
                             pairs.extend((float(iou), det_index, gt_index)
                                          for gt_index, iou in enumerate(ious)
-                                         if iou >= iou_threshold)
+                                         if easy[gt_index] and iou >= iou_threshold)
                         pairs.sort(reverse=True)
                         matched_detections, matched_targets = set(), set()
                         for _, det_index, gt_index in pairs:
@@ -115,10 +135,11 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
                             matched_detections.add(det_index)
                             matched_targets.add(gt_index)
                         for gt_index, class_id in enumerate(gt_labels):
-                            if gt_index not in matched_targets:
+                            if easy[gt_index] and gt_index not in matched_targets:
                                 confusion_matrix[int(class_id), background_id] += 1
                         for det_index, detection in enumerate(image_detections):
-                            if det_index not in matched_detections:
+                            if (det_index not in matched_detections
+                                    and det_index not in ignored_detections):
                                 confusion_matrix[background_id, detection["class_id"]] += 1
     finally:
         model.train(was_training)
@@ -130,12 +151,16 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
     totals = {"tp": 0, "fp": 0, "fn": 0}
     valid_metrics = []
     for class_id, class_name in enumerate(class_names):
-        gt_by_image = {
-            image_id: np.asarray(entry["boxes"])[
-                np.asarray(entry["labels"], dtype=np.int64) == class_id
-            ]
-            for image_id, entry in ground_truth.items()
-        }
+        gt_all_by_image, easy_by_image, gt_by_image = {}, {}, {}
+        for image_id, entry in ground_truth.items():
+            labels = np.asarray(entry["labels"], dtype=np.int64)
+            boxes = np.asarray(entry["boxes"]).reshape(-1, 4)
+            difficult = np.asarray(
+                entry.get("difficult", np.zeros(len(labels))), dtype=np.bool_)
+            selected = labels == class_id
+            gt_all_by_image[image_id] = boxes[selected]
+            easy_by_image[image_id] = ~difficult[selected]
+            gt_by_image[image_id] = boxes[selected & ~difficult]
         gt_count = sum(len(boxes) for boxes in gt_by_image.values())
         ranked = sorted(
             (det for det in detections
@@ -146,13 +171,17 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
                    for image_id, boxes in gt_by_image.items()}
         tp = fp = 0
         for det in ranked:
-            boxes = gt_by_image.get(det["image_id"], np.zeros((0, 4)))
-            if not len(boxes):
+            all_boxes = gt_all_by_image.get(det["image_id"], np.zeros((0, 4)))
+            if not len(all_boxes):
                 fp += 1
                 continue
-            overlaps = box_iou_xyxy(np.asarray(det["box"]), boxes)
+            overlaps = box_iou_xyxy(np.asarray(det["box"]), all_boxes)
             best = int(overlaps.argmax())
-            if overlaps[best] >= iou_threshold and not matched[det["image_id"]][best]:
+            if overlaps[best] < iou_threshold:
+                fp += 1
+            elif not easy_by_image[det["image_id"]][best]:
+                continue  # matched a difficult object: ignored (VOC)
+            elif not matched[det["image_id"]][best]:
                 matched[det["image_id"]][best] = True
                 tp += 1
             else:

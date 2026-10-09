@@ -207,5 +207,13 @@ def collate_fn(batch: list[dict]) -> dict:
             bi = torch.full((len(boxes), 1), batch_idx, dtype=torch.float32)
             targets.append(torch.cat((bi, labels, xywh), dim=1))
     targets = torch.cat(targets) if targets else torch.zeros((0, 6), dtype=torch.float32)
+    difficult = [
+        torch.as_tensor(
+            s.get("difficult", np.zeros(len(s["labels"]), dtype=np.bool_)),
+            dtype=torch.bool,
+        ).reshape(-1)
+        for s in batch
+    ]
     return {"images": images, "targets": targets,
-            "img_ids": [s["img_id"] for s in batch]}
+            "img_ids": [s["img_id"] for s in batch],
+            "difficult": difficult}
