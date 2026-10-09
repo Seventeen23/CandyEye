@@ -6,7 +6,6 @@ model:
   img_size: 128
 initialization:
   type: yolo11n
-  weights: weights/yolo11n.pth
 data:
   root: data/VOCdevkit
   train_split: trainval

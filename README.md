@@ -36,7 +36,7 @@ Three design ideas, one borrowed from each reference model:
 | Latency | < 10 ms/image @ 128px (TBD in Phase 8) |
 | Accuracy | mAP@0.5 baseline TBD after first training run |
 
-## Experiments (planned)
+## Experiments
 
 Three configs share the same neck/head, differing only in how the backbone is
 initialized:
@@ -84,11 +84,13 @@ pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 
 The wheel bundles the default `yolo11`/`yolo11_exchange` architecture configs, so
 `CandyEye()` works with no checkout and no download. The clean `yolo11n` weights
-are **not** redistributed (they derive from Ultralytics' AGPL-3.0 checkpoints):
-the first `train(..., pretrained=True)` downloads the official checkpoint and
-caches a clean state_dict under `~/.cache/candyeye/`. Install the optional
-converter with `pip install CandyEye[weights]`, or point `$CANDYEYE_WEIGHTS` at
-an existing `.pth` to stay offline.
+are **not** shipped in the wheel or sdist (they derive from Ultralytics'
+AGPL-3.0 checkpoints): a fresh install downloads the official checkpoint on the
+first `train(..., pretrained=True)` and caches a clean state_dict under
+`~/.cache/candyeye/`. In a source checkout, `candyeye/assets/yolo11n.pth` is used
+directly for offline dev/tests. Install the optional converter with
+`pip install CandyEye[weights]`, or point `$CANDYEYE_WEIGHTS` at an existing
+`.pth` to stay offline.
 
 ## Training
 
@@ -108,7 +110,7 @@ results = model.train(
     batch=16,
     patience=20,
     workers=0,
-    pretrained=True,  # start from the bundled yolo11n weights
+    pretrained=True,  # download + cache clean yolo11n weights on first use
     project="runs/train",
     name="voc_yolo11",
 )
@@ -185,12 +187,12 @@ results = train(data="dataset.yaml", epochs=100, imgsz=128, batch=16,
 
 ```bash
 # COCO-style mAP@0.5:0.95 (+ optional size buckets) for saved checkpoints
-PYTHONPATH=. venv/bin/python scripts/evaluate.py \
+python scripts/evaluate.py \
   --run configs/experiments/isda_exchange_dynamic.yaml \
         runs/experiments/isda_exchange_dynamic/best.pt --size-buckets
 
 # params, GFLOPs, and CPU latency at the configured image size
-PYTHONPATH=. venv/bin/python scripts/benchmark.py \
+python scripts/benchmark.py \
   --run configs/experiments/isda_baseline.yaml \
   --run configs/experiments/isda_exchange_dynamic.yaml
 ```
@@ -199,7 +201,7 @@ PYTHONPATH=. venv/bin/python scripts/benchmark.py \
 writes a per-checkpoint AP table; `scripts/benchmark.py` uses PyTorch's
 built-in FLOP counter (no extra dependency).
 
-
+## Data formats
 
 CandyEye accepts the common Roboflow image-folder and normalized `.txt` label
 export. Its `data.yaml` can look like this (paths may be relative to the YAML):
@@ -229,10 +231,6 @@ results = model.train(data=data_yaml, epochs=100, imgsz=128,
 
 See [ROADMAP.md](ROADMAP.md) for current evaluation and export work.
 
-> **Note:** package installation currently doesn't expose the modules outside
-> the repo root — run scripts from the repo root (see
-> [STATUS.md](STATUS.md#known-issues) for details).
-
 ## Project structure
 
 ```
@@ -243,7 +241,7 @@ CandyEye/
 │   ├── configs/                # bundled architecture YAMLs (package data)
 │   │   ├── yolo11.yaml
 │   │   └── yolo11_exchange.yaml
-│   ├── assets/yolo11n.pth      # bundled clean weights (package data)
+│   ├── assets/yolo11n.pth      # clean weights for dev/tests (not shipped in the wheel)
 │   ├── core/                   # model builder + nn.Module blocks
 │   │   ├── functions/          # stateless helpers (autopad, make_divisible)
 │   │   ├── modules/            # Conv, Bottleneck, C3k2, SPPF, C2PSA, DFL, Detect, ScaleExchange
@@ -289,7 +287,9 @@ CandyEye/
 
 **Pretrained weights note:** YOLO11 weights are licensed AGPL-3.0 by
 Ultralytics. They are used here for personal experimentation/fine-tuning only;
-weights files are `.gitignore`d and are not redistributed with this repository.
-Models trained from those weights may inherit AGPL obligations — check
+the original checkpoint is `.gitignore`d and never redistributed. A clean
+derived state_dict (`candyeye/assets/yolo11n.pth`) is kept in the repo for
+offline dev/tests/CI but is excluded from the published wheel and sdist. Models
+trained from those weights may inherit AGPL obligations — check
 [Ultralytics' license](https://ultralytics.com/license) before distributing
 trained weights.

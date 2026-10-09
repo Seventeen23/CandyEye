@@ -7,7 +7,6 @@ model:
   img_size: 128
 initialization:
   type: yolo11n
-  weights: weights/yolo11n.pth
 data:
   format: yolo_txt
   train_images: data/test_data/Isda Classifier.v5i.yolov8/train/images
