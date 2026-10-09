@@ -1,5 +1,6 @@
 # CandyEye
 
+[![PyPI](https://img.shields.io/pypi/v/CandyEye.svg)](https://pypi.org/project/CandyEye/)
 [![CI](https://github.com/Seventeen23/CandyEye/actions/workflows/ci.yml/badge.svg)](https://github.com/Seventeen23/CandyEye/actions/workflows/ci.yml)
 
 Lightweight, CPU-first object detector written from scratch — YOLOv11-style
@@ -81,9 +82,13 @@ For a CPU-only PyTorch wheel (recommended on laptops):
 pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 ```
 
-The wheel bundles the default `yolo11`/`yolo11_exchange` architecture configs and
-the clean `yolo11n` weights (`assets/yolo11n.pth`), so `CandyEye()` and
-`train(..., pretrained=True)` work with no checkout and no download.
+The wheel bundles the default `yolo11`/`yolo11_exchange` architecture configs, so
+`CandyEye()` works with no checkout and no download. The clean `yolo11n` weights
+are **not** redistributed (they derive from Ultralytics' AGPL-3.0 checkpoints):
+the first `train(..., pretrained=True)` downloads the official checkpoint and
+caches a clean state_dict under `~/.cache/candyeye/`. Install the optional
+converter with `pip install CandyEye[weights]`, or point `$CANDYEYE_WEIGHTS` at
+an existing `.pth` to stay offline.
 
 ## Training
 

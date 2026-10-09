@@ -20,6 +20,7 @@ from candyeye.paths import (
     cache_dir,
     default_config_path,
     default_weights_path,
+    download_default_weights,
     resolve_config,
 )
 
@@ -33,6 +34,7 @@ __all__ = [
     "resolve_config",
     "default_config_path",
     "default_weights_path",
+    "download_default_weights",
     "available_configs",
     "cache_dir",
     "__version__",

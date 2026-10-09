@@ -1,0 +1,14 @@
+# Source distribution contents. The clean yolo11n weights are intentionally
+# excluded (AGPL provenance); they are fetched on demand by candyeye.paths.
+include LICENSE
+include README.md
+include CHANGELOG.md
+include pyproject.toml
+recursive-include candyeye/configs *.yaml
+recursive-exclude candyeye/assets *.pth
+prune data
+prune runs
+prune weights
+prune tmp
+prune tests
+global-exclude *.py[cod] __pycache__/*

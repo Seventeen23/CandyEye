@@ -10,5 +10,7 @@ data/VOCdevkit/
 runs/
 weights/
 tmp/
+dist/
+build/
 *.pt
 :memory:.ses
