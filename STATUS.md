@@ -1,7 +1,9 @@
 # Status — Current Phase
 
 **Phase 6: Evaluation — IN PROGRESS (Phase 5 full runs remain pending)**
-Last updated: 2026-10-07
+**Packaging: v0.1.0 prepared** — installable wheel + sdist, CI, and a PyPI
+publish workflow; upload still pending.
+Last updated: 2026-10-09
 
 ---
 
@@ -71,9 +73,11 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 3. ~~**Editable install exposes nothing.**~~ **FIXED (reversed 2026-10-09)** —
    decision reversed: code now lives in an installable `candyeye/` package
    (`import candyeye`; public API `CandyEye`, `train`, `CandyEyePredictor`).
-   Default architecture configs and clean `yolo11n` weights are bundled as
-   package data, resolved via `candyeye/paths.py`, so training runs without a
-   repo checkout or repo-root paths.
+   Default architecture configs ship as package data, and clean `yolo11n`
+   weights are resolved via `candyeye/paths.py` in order: `$CANDYEYE_WEIGHTS` →
+   bundled asset (checkout only) → `~/.cache/candyeye/` → download + convert on
+   demand. The wheel/sdist ship no weights, so training runs without a repo
+   checkout or repo-root paths.
 
 4. ~~**`CandyEye.egg-info/` is tracked in git.**~~ **FIXED** — untracked via
    `git rm -r --cached`, ignored via `*.egg-info/` (files remain on disk).
@@ -89,8 +93,8 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
    `collate_fn` must be module-level (`data/voc.py`), lambdas from `__main__`
    raise `PicklingError`. Same rule applies to Phase 5's trainer.
 
-8. *Note:* empty `data/__init.py` / `scripts/__init.py` files exist (misnamed,
-   0 bytes) — unnecessary under flat layout; user to delete or rename.
+8. *Note:* empty `scripts/__init.py` remains (misnamed, 0 bytes, unnecessary in
+   the package layout); the earlier `data/__init.py` was removed.
 
 ## Phase 1 checklist
 
@@ -130,6 +134,10 @@ Bugs caught during build-out (all in `core/candyeye.py`, now fixed):
    ImageNet weights download).
 2. Evaluate the resulting checkpoints on the full VOC test split and record
    comparable mAP values.
+3. Publish `v0.1.0` — run the **Publish** workflow with `target: pypi`, or push
+   a `v*` tag (the tag path also needs the TestPyPI trusted publisher).
+4. Run the Isda 9-class exchange ablation and fold the results into the README
+   experiments table.
 
 ## Phase 2 checklist
 
@@ -195,7 +203,7 @@ Detect(nc=80)=464,912 matches the official model exactly.
 - [x] `training/trainer.py` — CPU AdamW training, 3-epoch warmup + cosine,
   CSV metrics, last/best checkpoints, and resume
 - [x] Public API: `CandyEye.train(data=..., epochs=..., imgsz=..., patience=...)`
-  plus `from core import train`
+  plus `from candyeye import train`
 - [x] `core/backbone_mobilenet.py` — MobileNetV3-Small feature adapter, FPN,
   and Detect head; optional torchvision ImageNet initialization
 - [x] Experiment configs for scratch, YOLO11n fine-tune, and MobileNetV3-Small

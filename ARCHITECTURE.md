@@ -90,8 +90,46 @@ the channel counts. The MobileNet model exposes the same neck via
 `neck: exchange`, `exchange_gate`, and `exchange_iters`.
 
 The extra layer shifts Detect from index 23 to 24, so `candyeye.core.convert_yolo11`'s
-`remap_prefix` re-keys the official head weights when initializing from
-`yolo11n.pth`.
+`remap_prefix` re-keys the official head weights when initializing from the
+default `yolo11n` checkpoint (see
+[Weight initialization](#weight-initialization)).
+
+## MobileNetV3-Small variant
+
+`candyeye.core.backbone_mobilenet.MobileNetV3SmallDetector` is the second
+backbone option (Experiment B). It takes the torchvision MobileNetV3-Small
+feature maps at strides 8/16/32, projects them to 64/128/256 channels
+(`proj3`/`proj4`/`proj5`), fuses them with a **light FPN** (one `C3k2` per
+level), and feeds the same anchor-free parallel `Detect` head described above —
+boxes only, `nc` classes. ImageNet initialization is optional (`pretrained`).
+
+Unlike the YAML model this keeps the compact light FPN rather than the full
+YOLO11 neck (no SPPF/C2PSA). `neck="exchange"` appends the same gated
+`ScaleExchange` used by `yolo11_exchange.yaml`, reusing the `none` / `static` /
+`dynamic` gates.
+
+## Weight initialization
+
+Architecture YAMLs are shipped as package data under `candyeye/configs/` and
+resolved by `candyeye.paths.resolve_config`, so `CandyEye()` and `train()` work
+from an installed wheel with no repo-root paths (bundled names `"yolo11"` and
+`"yolo11_exchange"`).
+
+Training and experiment configs select initialization with
+`initialization: {type: yolo11n}`. The state_dict location is resolved by
+`candyeye.paths.default_weights_path()` in this order:
+
+1. `$CANDYEYE_WEIGHTS` — an explicit local clean `.pth`;
+2. the bundled `candyeye/assets/yolo11n.pth` — present only in a source checkout
+   (kept for offline dev/tests/CI);
+3. the per-user cache `~/.cache/candyeye/yolo11n.pth`;
+4. download + convert the official checkpoint (`download_default_weights`,
+   requires the `[weights]` extra) and cache it.
+
+The distribution ships **no** weights. The official `yolo11n.pt` is re-saved as
+a clean state_dict of plain tensors by `candyeye.core.convert_yolo11`, and
+`remap_prefix` re-keys the COCO detect head onto our `nc`-class head (including
+the exchange model's shifted Detect index).
 
 ## Main building blocks
 

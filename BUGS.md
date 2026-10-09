@@ -134,7 +134,9 @@ This document summarizes all bugs identified during the read-only audit, with co
 
 ## Verification
 
-- All existing tests still pass: **45 passed** (`tests/` full suite, including 6 new test files: `test_assigner.py`, `test_predict.py`, `test_trainer_integrity.py`).
+- All existing tests still pass: **45 passed** at the time of this audit; the
+  suite has since grown to **60 passed** (57 excluding the opt-in ONNX-parity
+  tests).
 - New unit tests cover the correctness bugs: difficult plumbing end-to-end, assigner conflict resolution and quality masking, `evaluate_map50` out-of-range rejection, YOLO label-path fallbacks and preflight, predictor `imgsz` resolution and letterbox edge case, trainer log-rotation/schema tolerance, `max_batches==0` rejection, nc↔names mismatch, output-dir rename, and end-of-run artifact preservation on exceptions.
 - In-memory repros: H2 stress → 0/1152 positives with anchor outside assigned target (was >1%); H3 adversarial → assigned to claiming GT with `quality <= 0.2501`; H4 raises on out-of-range ids; H1 `collate_fn` carries `difficult` and evaluator ignores dets on difficult GT.
 

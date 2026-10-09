@@ -34,6 +34,11 @@ First public release: a lightweight, CPU-first object detector.
   `inference` modules to the `candyeye.*` package.
 - `pyproject.toml`: `requires-python >= 3.10`, SPDX `GPL-3.0-or-later`, version
   single-sourced from `candyeye.__version__`.
+- Experiment configs (`configs/experiments/*`) dropped the hard-coded
+  `weights/yolo11n.pth` path; weights now resolve through
+  `candyeye.paths.default_weights_path()`.
+- Docs (README, ARCHITECTURE, STATUS, ROADMAP) refreshed for the packaged
+  layout, on-demand weights, and the MobileNetV3-Small variant.
 
 ### Notes
 
