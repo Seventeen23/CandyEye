@@ -1,0 +1,61 @@
+# Opt-in ONNX numerical-parity check.
+#
+# The regular CI suite runs with `-m "not onnx"`. The parity tests compare our
+# fused model against the *official* fp32 ONNX graph, which is not committed
+# (it is a large, machine-specific dev artifact). This job bootstraps it:
+# download the official yolo11n checkpoint, export it to ONNX, and run only the
+# `onnx`-marked tests.
+name: ONNX parity
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Weekly, Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+
+jobs:
+  onnx-parity:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install CPU-only PyTorch
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install CandyEye with dev + parity dependencies
+        run: pip install -e ".[dev,parity]"
+
+      # ultralytics is used only to obtain the official ONNX export. Installing
+      # it after the CPU torch wheel keeps the CPU build in place.
+      - name: Install ultralytics (export only)
+        run: pip install ultralytics
+
+      - name: Export official yolo11n to ONNX
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from ultralytics import YOLO
+
+          model = YOLO("yolo11n.pt")  # auto-downloads the official checkpoint
+          exported = Path(model.export(format="onnx", opset=12, imgsz=640))
+          dest = Path("/tmp/opencode")
+          dest.mkdir(parents=True, exist_ok=True)
+          target = dest / "yolo11n.onnx"
+          exported.replace(target)
+          print(f"exported official ONNX -> {target}")
+          PY
+
+      - name: Run ONNX parity tests
+        env:
+          CANDYEYE_ONNX: /tmp/opencode/yolo11n.onnx
+        run: python -m pytest tests/test_convert.py -m onnx -q

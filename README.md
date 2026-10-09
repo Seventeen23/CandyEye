@@ -1,5 +1,7 @@
 # CandyEye
 
+[![CI](https://github.com/Seventeen23/CandyEye/actions/workflows/ci.yml/badge.svg)](https://github.com/Seventeen23/CandyEye/actions/workflows/ci.yml)
+
 Lightweight, CPU-first object detector written from scratch — YOLOv11-style
 architecture, trained on PASCAL VOC, exported to ONNX for fast CPU inference.
 

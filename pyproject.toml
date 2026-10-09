@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 plots = ["matplotlib>=3.8"]
 onnx = ["onnx>=1.16"]
+parity = ["onnx>=1.16", "onnxruntime>=1.17"]
 dev = ["pytest>=7.4", "matplotlib>=3.8", "onnx>=1.16"]
 
 [project.scripts]
@@ -34,3 +35,9 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 candyeye = ["configs/*.yaml", "assets/*.pth"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "onnx: numerical parity against the official ONNX graph (opt-in; see .github/workflows/onnx-parity.yml)",
+]

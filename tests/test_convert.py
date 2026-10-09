@@ -2,19 +2,23 @@
 
 Two weight sources, two purposes:
 
-- ``weights/yolo11n.pth`` (unfused, incl. BN buffers) checks the *loader
-  bookkeeping*: full nc=80 load (0/0) and the nc=20 class-branch skip set.
-  Numerically it is only fp16-checkpoint-close, so it is not a parity proof.
+- The bundled clean state_dict (``candyeye/assets/yolo11n.pth``, incl. BN
+  buffers) checks the *loader bookkeeping*: full nc=80 load (0/0) and the nc=20
+  class-branch skip set.  Numerically it is only fp16-checkpoint-close, so it is
+  not a parity proof.
 - The official fp32 ONNX graph's *fused* initializers give an EXACT parity
   proof: after ``CandyEye(...).fuse()`` our state_dict and the graph's weight
   tensors align 1:1, and running both graphs on the same input must agree to
-  fp noise (``< 1e-4``).
+  fp noise (``< 1e-4``).  This part needs the (uncommitted) ONNX export and is
+  marked ``onnx``; it runs in ``.github/workflows/onnx-parity.yml``, not in the
+  main CI job.
 
-Run:  PYTHONPATH=. venv/bin/python -m pytest tests/test_convert.py -q
-Prereqs (once): scripts/bootstrap_weights.py + the official ONNX at
-/tmp/opencode/yolo11n.onnx (torch.onnx.export of the .pt, fp32, opset 12).
+The ONNX path defaults to ``/tmp/opencode/yolo11n.onnx`` and can be overridden
+with ``$CANDYEYE_ONNX``.
 """
-import onnxruntime as ort
+import os
+from pathlib import Path
+
 import torch
 import pytest
 
@@ -23,13 +27,21 @@ from candyeye.core.convert_yolo11 import (
     load_official_state_dict, load_weights, load_fused_from_onnx,
 )
 from candyeye.core import CandyEye
+from candyeye.paths import default_weights_path
 
 CFG = "configs/yolo11.yaml"
-WEIGHTS = "weights/yolo11n.pth"
-ONNX = "/tmp/opencode/yolo11n.onnx"  # official fp32 export (BN fused)
+WEIGHTS = str(default_weights_path())  # bundled clean state_dict (tracked)
+ONNX = Path(os.environ.get("CANDYEYE_ONNX", "/tmp/opencode/yolo11n.onnx"))
 
 sd = load_official_state_dict(WEIGHTS)
-fused = load_fused_from_onnx(ONNX)
+
+
+def _fused() -> dict:
+    """Load the official ONNX initializers, or skip if unavailable."""
+    pytest.importorskip("onnx")
+    if not ONNX.exists():
+        pytest.skip(f"official ONNX graph not found: {ONNX} (set $CANDYEYE_ONNX)")
+    return load_fused_from_onnx(str(ONNX))
 
 
 def make(nc: int, size: int = 128) -> CandyEye:
@@ -69,8 +81,10 @@ def test_nc20_sparse_load():
     assert tuple(out.shape) == (1, 24, 336)
 
 
+@pytest.mark.onnx
 def test_fuse_layout_matches_onnx():
     """After fuse(), the state_dict keys ARE the ONNX key set (no .bn.*)."""
+    fused = _fused()
     m = make(80).fuse()
     fc = {k for k in fused if ".conv.weight" in k or ".conv.bias" in k}
     # every official conv weight/bias has a matching placeholder in our model
@@ -81,12 +95,14 @@ def test_fuse_layout_matches_onnx():
 
 
 def run_onnx(x: torch.Tensor) -> torch.Tensor:
-    sess = ort.InferenceSession(ONNX, providers=["CPUExecutionProvider"])
+    ort = pytest.importorskip("onnxruntime")
+    sess = ort.InferenceSession(str(ONNX), providers=["CPUExecutionProvider"])
     (name,) = [i.name for i in sess.get_inputs()]
     (out,) = sess.run(None, {name: x.numpy()})
     return torch.from_numpy(out)
 
 
+@pytest.mark.onnx
 @pytest.mark.parametrize("nc,row_slice", [(80, 84), (20, 4)])
 def test_onnx_parity(nc, row_slice):
     """Our fused model must equal the official ONNX on the *shared* rows.
@@ -95,6 +111,7 @@ def test_onnx_parity(nc, row_slice):
     "fp16 checkpoint drift".  nc=20 only shares the 4 box rows (the class
     branch is deliberately left random).
     """
+    fused = _fused()
     m = make(nc).fuse()
     r = load_weights(m, fused)
     if nc == 20:
