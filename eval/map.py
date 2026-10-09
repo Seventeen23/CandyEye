@@ -110,3 +110,105 @@ def evaluate_map50(ground_truth: dict, detections: list[dict],
 
     mean_ap = float(np.mean(valid_aps)) if valid_aps else 0.0
     return mean_ap, class_ap
+
+
+# COCO-style IoU sweep: 0.50, 0.55, ..., 0.95.
+IOU_THRESHOLDS = tuple(round(0.5 + 0.05 * i, 2) for i in range(10))
+
+
+def _default_area_ranges(image_size: float) -> dict:
+    """COCO small/medium/large area cutoffs, rescaled to ``image_size``.
+
+    COCO defines them in absolute pixels on ~640px inputs (32^2 and 96^2);
+    scaling by ``image_size / 640`` keeps the buckets meaningful on our
+    128px training budget.
+    """
+    scale = float(image_size) / 640.0
+    small, medium = (32 * scale) ** 2, (96 * scale) ** 2
+    return {"small": (0.0, small), "medium": (small, medium),
+            "large": (medium, float("inf"))}
+
+
+def _filter_area(ground_truth: dict, detections: list[dict],
+                 low: float, high: float):
+    """Keep only GT boxes and detections whose pixel area falls in [low, high)."""
+    filtered_gt = {}
+    for image_id, entry in ground_truth.items():
+        boxes = np.asarray(entry["boxes"], dtype=np.float64).reshape(-1, 4)
+        labels = np.asarray(entry["labels"], dtype=np.int64)
+        difficult = np.asarray(entry.get("difficult", np.zeros(len(boxes))),
+                               dtype=np.bool_)
+        areas = np.prod(np.maximum(boxes[:, 2:] - boxes[:, :2], 0), axis=1)
+        keep = (areas >= low) & (areas < high)
+        filtered_gt[image_id] = {"boxes": boxes[keep], "labels": labels[keep],
+                                 "difficult": difficult[keep]}
+    filtered_detections = []
+    for det in detections:
+        box = np.asarray(det["box"], dtype=np.float64)
+        area = float(np.prod(np.maximum(box[2:] - box[:2], 0)))
+        if low <= area < high:
+            filtered_detections.append(det)
+    return filtered_gt, filtered_detections
+
+
+def _has_positives(ground_truth: dict) -> bool:
+    """True when any non-difficult ground-truth box survives the filter."""
+    for entry in ground_truth.values():
+        labels = np.asarray(entry["labels"], dtype=np.int64)
+        difficult = np.asarray(entry.get("difficult", np.zeros(len(labels))),
+                               dtype=np.bool_)
+        if len(labels) and np.any(~difficult):
+            return True
+    return False
+
+
+def evaluate_map(ground_truth: dict, detections: list[dict], num_classes: int,
+                 iou_thresholds=IOU_THRESHOLDS, image_size: float = 640,
+                 size_buckets: bool = False, area_ranges: dict | None = None) -> dict:
+    """COCO-style mAP@0.5:0.95 plus optional small/medium/large breakdown.
+
+    Averaging per-class AP over the IoU sweep is the COCO ``mAP``; ``map50`` and
+    ``map75`` are the values at those single thresholds. Size buckets re-run the
+    matching on area-filtered GT and detections only.
+    """
+    per_threshold, per_class_by_threshold = {}, {}
+    for threshold in iou_thresholds:
+        key = round(float(threshold), 2)
+        mean_ap, class_ap = evaluate_map50(ground_truth, detections, num_classes,
+                                           iou_threshold=float(threshold))
+        per_threshold[key] = mean_ap
+        per_class_by_threshold[key] = class_ap
+
+    per_class = {}
+    for class_id in range(num_classes):
+        values = [per_class_by_threshold[key][class_id]
+                  for key in per_class_by_threshold
+                  if per_class_by_threshold[key][class_id] is not None]
+        per_class[class_id] = float(np.mean(values)) if values else None
+
+    result = {
+        "map": float(np.mean(list(per_threshold.values()))) if per_threshold else 0.0,
+        "map50": per_threshold.get(0.5),
+        "map75": per_threshold.get(0.75),
+        "per_threshold": per_threshold,
+        "per_class": per_class,
+        "per_class_ap50": per_class_by_threshold.get(0.5, {}),
+        "iou_thresholds": sorted(per_threshold),
+        "size": None,
+    }
+    if size_buckets:
+        ranges = area_ranges or _default_area_ranges(image_size)
+        size = {}
+        for name, (low, high) in ranges.items():
+            bucket_gt, bucket_det = _filter_area(ground_truth, detections, low, high)
+            if not _has_positives(bucket_gt):
+                size[name] = None
+                continue
+            values = [
+                evaluate_map50(bucket_gt, bucket_det, num_classes,
+                               iou_threshold=float(threshold))[0]
+                for threshold in iou_thresholds
+            ]
+            size[name] = float(np.mean(values)) if values else None
+        result["size"] = size
+    return result

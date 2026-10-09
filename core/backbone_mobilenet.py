@@ -9,6 +9,7 @@ from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
 from core.modules.blocks import C3k2
 from core.modules.conv import Conv
 from core.modules.detect import Detect
+from core.modules.exchange import ScaleExchange
 
 
 class MobileNetV3SmallDetector(nn.Module):
@@ -16,12 +17,18 @@ class MobileNetV3SmallDetector(nn.Module):
 
     ImageNet initialization is optional because torchvision may need to
     download the checkpoint when it is not in the local torch cache.
+
+    ``neck="light"`` (default) keeps the compact custom FPN. ``neck="exchange"``
+    appends the gated cross-scale exchange neck before the Detect head.
     """
     def __init__(self, nc: int = 20, img_size: int = 128,
-                 pretrained: bool = False):
+                 pretrained: bool = False, neck: str = "light",
+                 exchange_gate: str = "none", exchange_iters: int = 1):
         super().__init__()
         if img_size % 32:
             raise ValueError(f"img_size must be divisible by 32, got {img_size}")
+        if neck not in ("light", "exchange"):
+            raise ValueError(f"unknown neck {neck!r} (have 'light', 'exchange')")
         weights = MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
         backbone = mobilenet_v3_small(weights=weights)
         self.backbone = backbone.features
@@ -36,6 +43,12 @@ class MobileNetV3SmallDetector(nn.Module):
         self.pan4 = C3k2(192, 128, n=1, c3k=False)
         self.down5 = Conv(128, 128, 3, 2)
         self.pan5 = C3k2(384, 256, n=1, c3k=False)
+
+        self.neck = neck
+        self.exchange = (
+            ScaleExchange(64, 128, 256, gate=exchange_gate, iters=exchange_iters)
+            if neck == "exchange" else None
+        )
 
         detect = Detect(nc=nc, ch=(64, 128, 256))
         detect.stride = torch.tensor([8., 16., 32.])
@@ -63,4 +76,7 @@ class MobileNetV3SmallDetector(nn.Module):
                                                     mode="nearest"), p3), 1))
         p4_out = self.pan4(torch.cat((self.down4(p3_out), p4_td), 1))
         p5_out = self.pan5(torch.cat((self.down5(p4_out), p5), 1))
-        return self.model[-1]([p3_out, p4_out, p5_out], decode=decode)
+        features = [p3_out, p4_out, p5_out]
+        if self.exchange is not None:
+            features = self.exchange(features)
+        return self.model[-1](features, decode=decode)

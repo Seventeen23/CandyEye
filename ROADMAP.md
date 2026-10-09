@@ -12,6 +12,10 @@ lightweight** (MobileNet: ~2.6M params, CPU-only, 128×128) · **parallel**
 (YOLACT++: FPN neck scales + the Detect head's box/class branches compute
 simultaneously over shared conv features — no mask branch, boxes only).
 
+All three pillars are delivered by **one configurable detector family**: a
+YOLO11-CSP backbone or a MobileNetV3-Small backbone + light FPN, both feeding
+the shared anchor-free parallel `Detect` head (see Phase 9).
+
 ---
 
 ## Phase 0 — Environment & data
@@ -94,6 +98,7 @@ simultaneously over shared conv features — no mask branch, boxes only).
 - [x] Toy-example unit test (hand-computed)
 - [x] Difficult-flag handling
 - [x] mAP table per checkpoint (CSV evaluator)
+- [x] COCO mAP@0.5:0.95 + small/medium/large size buckets
 - [ ] Full VOC test-split results for trained checkpoints
 
 ## Phase 7 — Inference polish
@@ -110,9 +115,32 @@ simultaneously over shared conv features — no mask branch, boxes only).
 
 - [ ] `torch.onnx.export` for all three configs
 - [ ] Parity test: PyTorch vs ONNX Runtime (max abs diff)
+- [x] PyTorch params / GFLOPs / CPU-latency table (`scripts/benchmark.py`)
 - [ ] Latency benchmark @ 128px (median, warmup) — target < 10 ms
 - [ ] Model size table (FP32 / INT8)
 - [ ] (optional) INT8 dynamic quantization + mAP delta
+
+## Phase 9 — Unified detector family
+
+**Goal:** one configurable detector family that combines all three design
+pillars — MobileNet backbone, YOLO detection, YOLACT++-style parallel branches —
+with **boxes only**. Keep the existing **light FPN** as the default MobileNet
+neck (CPU-first, ~2.6M params); the full YOLO11 neck (SPPF + C2PSA + C3k2) is a
+deferred, opt-in accuracy experiment (see Post-1.0).
+
+**Non-goal:** instance segmentation / prototype masks.
+
+- [ ] `core/factory.py` — `build_detector(cfg, nc, img_size, model_type)` shared by trainer and predictor
+- [ ] `MobileNetV3SmallDetector` — add `set_classes()` and a `train(data=...)` dispatch mirroring `CandyEye.train`; keep the light FPN (no SPPF/C2PSA)
+- [ ] `training/trainer.py` — build via the factory and record the real `model.type` in the saved config
+- [ ] `inference/predict.py` — rebuild the correct family from `saved_config["model"]["type"]`
+- [ ] Config for the combined model (reuse `mobilenetv3_small` or add a named config)
+- [ ] Tests — factory selection, train-smoke → save → predictor reload round-trip, `set_classes`
+- [ ] Docs — update `ARCHITECTURE.md` / `README.md` to describe the unified family
+
+**Novelty note:** this is an engineering integration of established components
+(efficient backbone + anchor-free YOLO head + parallel branches), not a new
+architecture claim.
 
 ---
 
@@ -122,11 +150,16 @@ simultaneously over shared conv features — no mask branch, boxes only).
 - VOC 07+12 trainset (16.5k images)
 - Input-size sweep (96 / 160 / 192 / 320)
 - INT8 static quantization with calibration set
+- Full YOLO11 neck (SPPF + C2PSA + C3k2) on the MobileNet backbone as an opt-in accuracy experiment (default stays the light FPN)
 - Instance segmentation heads (YOLACT-style prototype masks), revisit if needed
 
 ### Proposed research direction: molecular-inspired adaptive scale exchange
 
-**Status:** hypothesis only; not implemented and not a novelty claim.
+**Status:** neck implemented (`core/modules/exchange.py`, `ScaleExchange` with
+`none`/`static`/`dynamic` gates, wired into `configs/yolo11_exchange.yaml` and
+the MobileNet `neck: exchange` option). The Isda ablation configs exist
+(`configs/experiments/isda_*`); running the controlled comparison and any
+originality claim are still pending.
 
 The fructose/glucose analogy can motivate a design principle: local interactions
 between feature scales should combine into a useful global representation. Treat

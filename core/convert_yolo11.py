@@ -114,6 +114,24 @@ EXPECTED_FUSED_NC20_SKIPPED = frozenset(
 )
 
 
+def remap_prefix(official: dict[str, torch.Tensor], source_index: int,
+                 target_index: int) -> dict[str, torch.Tensor]:
+    """Shift ``model.<source_index>.*`` keys onto another layer index.
+
+    Neck variants that add layers after the original Detect (e.g. the
+    ``ScaleExchange`` neck) move Detect from layer 23 to a new index, so the
+    official head keys must be re-keyed before loading.
+    """
+    if source_index == target_index:
+        return official
+    source = f"model.{source_index}."
+    target = f"model.{target_index}."
+    return {
+        (target + key[len(source):] if key.startswith(source) else key): value
+        for key, value in official.items()
+    }
+
+
 def load_fused_from_onnx(path: str = ONNX_PATH) -> dict[str, torch.Tensor]:
     """Read the official ONNX graph initializers as a name -> fp32 Tensor dict.
 

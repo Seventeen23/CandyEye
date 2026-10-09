@@ -1,0 +1,27 @@
+name: isda_mobilenet_exchange_none
+model:
+  type: mobilenetv3_small
+  neck: exchange
+  exchange_gate: none
+  nc: 9
+  img_size: 128
+initialization:
+  type: scratch
+data:
+  format: yolo_txt
+  train_images: data/test_data/Isda Classifier.v5i.yolov8/train/images
+  val_images: data/test_data/Isda Classifier.v5i.yolov8/valid/images
+  test_images: data/test_data/Isda Classifier.v5i.yolov8/test/images
+  nc: 9
+  names: ['Bangus', 'Barilison', 'Bodboron', 'Caraballas', 'Danggit', 'Matambaka', 'Moromoro', 'Pompano', 'Tilapia']
+  batch_size: 16
+  workers: 4
+  mosaic_probability: 0.0
+train:
+  epochs: 30
+  learning_rate: 0.001
+  weight_decay: 0.0005
+  warmup_epochs: 3
+  min_lr_ratio: 0.01
+  seed: 23
+  output: runs/experiments/isda_mobilenet_exchange_none

@@ -28,6 +28,7 @@ from core.functions.layer_utils import make_divisible
 from core.modules.blocks import Attention, Bottleneck, C2PSA, C3k, C3k2, PSABlock, SPPF
 from core.modules.conv import Conv
 from core.modules.detect import Detect
+from core.modules.exchange import ScaleExchange
 
 
 class Concat(nn.Module):
@@ -52,6 +53,7 @@ _MODULE_MAP = {
     "C2PSA": C2PSA,
     "Concat": Concat,
     "Detect": Detect,
+    "ScaleExchange": ScaleExchange,
     "nn.Upsample": nn.Upsample,
     "nn.Conv2d": nn.Conv2d,
 }
@@ -60,6 +62,24 @@ _CHANNEL_MODULES = {"Conv", "C3k2", "C2PSA", "SPPF", "C3k", "Bottleneck", "Atten
 
 # depth_mult, width_mult, max_channels
 _SCALES = {"n": (0.50, 0.25, 1024)}
+
+
+def _source_channels(src: list[int], cur: int | list[int],
+                     ch: dict[int, int | list[int]]) -> list[int]:
+    """Flatten the input-channel spec of a multi-input layer.
+
+    A source entry may itself be a channel *list* (a previous multi-output
+    layer such as ``ScaleExchange``), in which case its channels are spliced in.
+    """
+    channels: list[int] = []
+    for index in src:
+        entry = cur if index == -1 else ch[index]
+        if isinstance(entry, (list, tuple)):
+            channels.extend(entry)
+        else:
+            channels.append(entry)
+    return channels
+
 
 
 def parse_model(data: dict) -> nn.Sequential:
@@ -96,8 +116,16 @@ def parse_model(data: dict) -> nn.Sequential:
         elif m == "Concat":
             c2 = sum(cur if x == -1 else ch[x] for x in f)
         elif m == "Detect":
-            args.append([cur if x == -1 else ch[x] for x in f])
+            src = f if isinstance(f, (list, tuple)) else [f]
+            args.append(_source_channels(src, cur, ch))
             c2 = nc  # not referenced downstream; placeholder
+        elif m == "ScaleExchange":
+            src = f if isinstance(f, (list, tuple)) else [f]
+            in_ch = _source_channels(src, cur, ch)
+            gate = str(args[0]) if args else "none"
+            iters = int(args[1]) if len(args) > 1 else 1
+            args = [*in_ch, gate, iters]
+            c2 = list(in_ch)  # this layer emits a channel *list*
         else:
             raise ValueError(f"unhandled module {m!r}")
 

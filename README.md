@@ -44,6 +44,28 @@ initialized:
 | `yolo11n_finetune` | YOLO11n COCO weights, detect head reinit | likely best accuracy |
 | `mobilenetv3_small` | ImageNet-pretrained backbone, fresh neck/head | pretrained-backbone experiment |
 
+### Adaptive cross-scale exchange neck
+
+`core/modules/exchange.py` adds an optional `ScaleExchange` neck that sits
+between the existing FPN and the Detect head. Instead of only the fixed
+top-down/bottom-up path, adjacent pyramid levels (P3↔P4, P4↔P5) pass a cheap
+depthwise message whose admission is controlled by a gate:
+
+| Gate | Behaviour |
+|---|---|
+| `none` | fixed 0.5 mix — ablation control |
+| `static` | `sigmoid(learnable per-channel weight + bias)` — BiFPN-like |
+| `dynamic` | gate computed at runtime from the two feature maps — content-conditioned |
+
+The `dynamic` gate is the intended contribution: unlike BiFPN's fixed learned
+scalar weights, the amount of exchange adapts per input. Gates initialize
+near-closed (`bias -4.0`), so an exchange model starts close to the plain
+baseline. The neck is selectable through the architecture YAML
+(`configs/yolo11_exchange.yaml`, layer 23) and as a `neck: exchange` option on
+the MobileNet model, with experiment configs under `configs/experiments/`
+(`isda_baseline`, `isda_exchange_{none,static,dynamic}`, and the
+`isda_mobilenet_*` variants).
+
 ## Quickstart
 
 ```bash
@@ -82,10 +104,11 @@ print(results["best"])
 
 This CPU-first trainer saves `best.pt`, `last.pt`, and `metrics.csv` in the
 run directory. Each epoch reports train and validation total, box,
-classification, and DFL losses, plus aggregate precision, recall, F1, and
-mAP@0.5. Per-class precision, recall, F1, and AP@0.5 are stored in
-`metrics.csv` rather than printed every epoch. Precision/recall/F1 use confidence 0.25 and IoU 0.5; AP uses
-confidence 0.001 and IoU 0.5. `best.pt` is selected by validation mAP@0.5, and
+classification, and DFL losses, plus aggregate precision, recall, F1,
+mAP@0.5, and mAP@0.5:0.95. Per-class precision, recall, F1, AP@0.5, and
+COCO AP are stored in `metrics.csv` rather than printed every epoch, together
+with a small/medium/large mAP breakdown. Precision/recall/F1 use confidence 0.25 and IoU 0.5; AP uses
+confidence 0.001 and the IoU sweep 0.50:0.05:0.95. `best.pt` is selected by validation mAP@0.5, and
 `patience` stops after that metric fails to improve. Resume with `resume=True`
 or pass a checkpoint path. `imgsz` must be divisible by 32. Detection
 “accuracy” is not a standard object-detection metric, so use precision, recall,
@@ -145,7 +168,25 @@ results = train(model="configs/yolo11.yaml", data="configs/default.yaml",
                 epochs=100, imgsz=128, batch=16, patience=20)
 ```
 
-### Roboflow YOLO detection export
+### Evaluation and benchmarking
+
+```bash
+# COCO-style mAP@0.5:0.95 (+ optional size buckets) for saved checkpoints
+PYTHONPATH=. venv/bin/python scripts/evaluate.py \
+  --run configs/experiments/isda_exchange_dynamic.yaml \
+        runs/experiments/isda_exchange_dynamic/best.pt --size-buckets
+
+# params, GFLOPs, and CPU latency at the configured image size
+PYTHONPATH=. venv/bin/python scripts/benchmark.py \
+  --run configs/experiments/isda_baseline.yaml \
+  --run configs/experiments/isda_exchange_dynamic.yaml
+```
+
+`scripts/evaluate.py` accepts both VOC and `format: yolo_txt` configs and
+writes a per-checkpoint AP table; `scripts/benchmark.py` uses PyTorch's
+built-in FLOP counter (no extra dependency).
+
+
 
 CandyEye accepts the common Roboflow image-folder and normalized `.txt` label
 export. Its `data.yaml` can look like this (paths may be relative to the YAML):

@@ -5,17 +5,20 @@ import numpy as np
 import torch
 from torchvision.ops import batched_nms
 
-from eval.map import box_iou_xyxy, evaluate_map50
+from eval.map import IOU_THRESHOLDS, box_iou_xyxy, evaluate_map
 
 
 def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
                       conf_threshold: float = 0.25, ap_conf_threshold: float = 0.001,
                       iou_threshold: float = 0.5, max_detections: int = 300,
-                      criterion=None, include_confusion_matrix: bool = False) -> dict:
+                      criterion=None, include_confusion_matrix: bool = False,
+                      iou_thresholds=None, size_buckets: bool = False) -> dict:
     """Evaluate a detector and report per-class/macro/micro metrics.
 
-    Precision, recall, and F1 use ``conf_threshold``. AP uses detections above
-    ``ap_conf_threshold`` and all-point interpolation at ``iou_threshold``.
+    Precision, recall, and F1 use ``conf_threshold`` and match at
+    ``iou_threshold``. ``map50`` is AP at ``iou_threshold`` and ``map50_95`` is
+    the COCO mean over ``iou_thresholds`` (default 0.5:0.95). With
+    ``size_buckets`` a small/medium/large mAP breakdown is also returned.
     Boxes are matched one-to-one within each image and class.
     """
     if class_names is None:
@@ -31,6 +34,7 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
     val_loss_sums = {"loss": 0.0, "box": 0.0, "cls": 0.0,
                      "dfl": 0.0, "foreground": 0.0}
     val_batches = 0
+    image_size = 640
     was_training = model.training
     model.eval()
     try:
@@ -50,6 +54,7 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
                     raise ValueError("model eval forward must return (B, 4 + nc, anchors)")
                 predictions = predictions.transpose(1, 2)
                 size = images.shape[-1]
+                image_size = size
                 for batch_index, image_id in enumerate(batch["img_ids"]):
                     target = targets[targets[:, 0] == batch_index]
                     if len(target):
@@ -144,9 +149,13 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
     finally:
         model.train(was_training)
 
-    map50, class_ap = evaluate_map50(
-        ground_truth, detections, num_classes, iou_threshold=iou_threshold
+    map_metrics = evaluate_map(
+        ground_truth, detections, num_classes,
+        iou_thresholds=iou_thresholds or IOU_THRESHOLDS,
+        image_size=image_size, size_buckets=size_buckets,
     )
+    map50 = map_metrics["map50"]
+    class_ap = map_metrics["per_class_ap50"]
     per_class = {}
     totals = {"tp": 0, "fp": 0, "fn": 0}
     valid_metrics = []
@@ -195,6 +204,7 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
             "recall": recall if gt_count else None,
             "f1": f1 if gt_count else None,
             "ap50": class_ap[class_id],
+            "ap": map_metrics["per_class"][class_id],
             "ground_truth": gt_count,
             "predictions": len(ranked),
         }
@@ -212,6 +222,10 @@ def evaluate_detector(model, loader, *, num_classes: int, class_names=None,
     macro = np.mean(valid_metrics, axis=0) if valid_metrics else (0.0, 0.0, 0.0)
     return {
         "map50": map50,
+        "map50_95": map_metrics["map"],
+        "map75": map_metrics["map75"],
+        "size_map": map_metrics["size"],
+        "iou_thresholds": map_metrics["iou_thresholds"],
         "precision": float(macro[0]), "recall": float(macro[1]),
         "f1": float(macro[2]),
         "micro_precision": micro_precision, "micro_recall": micro_recall,

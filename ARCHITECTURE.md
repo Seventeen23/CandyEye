@@ -2,6 +2,9 @@
 
 This document describes the network currently built from
 [`configs/yolo11.yaml`](configs/yolo11.yaml) by `core.candyeye.CandyEye`.
+[`configs/yolo11_exchange.yaml`](configs/yolo11_exchange.yaml) is the same graph
+with the optional exchange neck inserted before the head (see
+[Optional exchange neck](#optional-exchange-neck)).
 The configuration defines the layer graph; the `n` scale uses depth multiplier
 `0.50` and width multiplier `0.25`. Dataset metadata can set the number of
 classes (`nc`) when training starts.
@@ -74,6 +77,21 @@ Each of the three scales is processed by two separate branches:
 During training, the head returns three raw maps with `64 + nc` channels each.
 During evaluation, it decodes the box distributions, applies sigmoid to class
 scores, and combines all three scales into one prediction tensor.
+
+## Optional exchange neck
+
+`configs/yolo11_exchange.yaml` appends one `ScaleExchange` layer (layer 23)
+over `[16, 19, 22]` before Detect (layer 24). It treats P3/P4/P5 as interacting
+groups: each adjacent pair passes a cheap depthwise message whose admission is
+gated. The three gate modes are `none` (fixed 0.5), `static` (learnable
+per-channel), and `dynamic` (computed from the feature maps). Input and output
+are the same three feature maps, so it drops in without changing the head or
+the channel counts. The MobileNet model exposes the same neck via
+`neck: exchange`, `exchange_gate`, and `exchange_iters`.
+
+The extra layer shifts Detect from index 23 to 24, so `core.convert_yolo11`'s
+`remap_prefix` re-keys the official head weights when initializing from
+`yolo11n.pth`.
 
 ## Main building blocks
 

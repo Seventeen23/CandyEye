@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import math
 import random
@@ -14,7 +15,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from core.backbone_mobilenet import MobileNetV3SmallDetector
-from core.convert_yolo11 import load_official_state_dict, load_weights
+from core.convert_yolo11 import load_official_state_dict, load_weights, remap_prefix
 from core import CandyEye
 from data.transforms import Compose, HSVJitter, RandomHorizontalFlip
 from data.yolo import YoloTxtDataset
@@ -68,12 +69,15 @@ def _save_training_plots(metrics_path: Path, output: Path) -> Path | None:
 
     for key, label in (("precision_macro", "Precision"),
                        ("recall_macro", "Recall"),
-                       ("f1_macro", "F1"), ("map50", "mAP50")):
+                       ("f1_macro", "F1"), ("map50", "mAP50"),
+                       ("map50_95", "mAP50-95")):
+        if key not in rows[0]:
+            continue
         axes[2].plot(epochs, [float(row[key]) for row in rows], label=label)
     axes[2].set_title("Validation performance")
     axes[2].set_ylabel("Score")
     axes[2].set_ylim(0, 1.02)
-    axes[2].legend(ncol=4)
+    axes[2].legend(ncol=5)
 
     axes[3].plot(epochs, [float(row["lr"]) for row in rows], label="Learning rate")
     axes[3].set_title("Learning rate")
@@ -149,19 +153,62 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
+def _patch_exchange_cfg(cfg, gate, iters):
+    """Load a YOLO architecture YAML and override the ScaleExchange gate/iters.
+
+    Lets experiment configs share one exchange architecture and switch the
+    ablation arm via ``model.exchange_gate``.
+    """
+    if isinstance(cfg, dict):
+        data = copy.deepcopy(cfg)
+    else:
+        with open(cfg, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    patched = False
+    for section in ("backbone", "head"):
+        for entry in data.get(section, []):
+            if entry[2] != "ScaleExchange":
+                continue
+            args = list(entry[3])
+            if gate is not None:
+                args[0] = str(gate)
+            if iters is not None:
+                if len(args) > 1:
+                    args[1] = int(iters)
+                else:
+                    args.append(int(iters))
+            entry[3] = args
+            patched = True
+    if not patched:
+        raise ValueError(
+            "exchange_gate/exchange_iters set but the model config has no "
+            "ScaleExchange layer"
+        )
+    return data
+
+
 def build_experiment_model(config: dict, no_pretrained: bool = False):
     model_cfg = config["model"]
     init_cfg = config.get("initialization", {})
     model_type = model_cfg.get("type", "yolo")
     if model_type == "yolo":
-        model = CandyEye(model_cfg.get("cfg", "configs/yolo11.yaml"),
+        cfg = model_cfg.get("cfg", "configs/yolo11.yaml")
+        gate = model_cfg.get("exchange_gate")
+        iters = model_cfg.get("exchange_iters")
+        if gate is not None or iters is not None:
+            cfg = _patch_exchange_cfg(cfg, gate, iters)
+        model = CandyEye(cfg,
                          nc=model_cfg.get("nc", 20),
                          img_size=model_cfg.get("img_size", 128))
         if init_cfg.get("type") == "yolo11n":
             path = Path(init_cfg.get("weights", "weights/yolo11n.pth"))
             if not path.exists():
                 raise FileNotFoundError(f"pretrained YOLO11 source weights not found: {path}")
-            report = load_weights(model, load_official_state_dict(str(path)))
+            official = load_official_state_dict(str(path))
+            detect_index = getattr(model.model[-1], "i", len(model.model) - 1)
+            report = load_weights(
+                model, remap_prefix(official, source_index=23,
+                                    target_index=detect_index))
             if report["unexpected"]:
                 raise RuntimeError(f"unexpected pretrained keys: {report['unexpected'][:5]}")
             print(f"loaded {len(report['loaded'])} pretrained tensors; "
@@ -171,7 +218,10 @@ def build_experiment_model(config: dict, no_pretrained: bool = False):
         pretrained = bool(init_cfg.get("pretrained", False)) and not no_pretrained
         return MobileNetV3SmallDetector(
             nc=model_cfg.get("nc", 20), img_size=model_cfg.get("img_size", 128),
-            pretrained=pretrained)
+            pretrained=pretrained,
+            neck=model_cfg.get("neck", "light"),
+            exchange_gate=model_cfg.get("exchange_gate", "none"),
+            exchange_iters=int(model_cfg.get("exchange_iters", 1)))
     raise ValueError(f"unknown model type: {model_type}")
 
 
@@ -291,13 +341,14 @@ def run_training(config: dict, *, epochs: int | None = None,
     class_columns = [column for name in class_names
                      for column in (f"{name}/gt", f"{name}/precision",
                                     f"{name}/recall", f"{name}/f1",
-                                    f"{name}/ap50")]
+                                    f"{name}/ap50", f"{name}/ap")]
     header = ["epoch", "lr", "train_loss", "train_box", "train_cls",
               "train_dfl", "train_foreground", "val_loss", "val_box",
               "val_cls", "val_dfl",
               "val_foreground",
               "precision_macro", "recall_macro", "f1_macro",
               "precision_micro", "recall_micro", "f1_micro", "map50",
+              "map50_95", "map_small", "map_medium", "map_large",
               *class_columns]
     if not resume:
         write_header = True
@@ -353,10 +404,12 @@ def run_training(config: dict, *, epochs: int | None = None,
                 best_loss = min(best_loss, epoch_loss)
                 validation = evaluate_detector(
                     model, val_loader, num_classes=int(model_nc), class_names=class_names,
-                    criterion=criterion,
+                    criterion=criterion, size_buckets=True,
                 )
                 val_loss = validation["val_loss"]
                 map50 = validation["map50"]
+                map50_95 = validation["map50_95"]
+                size_map = validation["size_map"] or {}
                 improved = (map50 > best_map50 + 1e-12 or
                             (abs(map50 - best_map50) <= 1e-12 and
                              val_loss["loss"] < best_val_loss))
@@ -370,8 +423,12 @@ def run_training(config: dict, *, epochs: int | None = None,
                     for field in (
                         value["ground_truth"],
                         *(value[metric] if value[metric] is not None else "n/a"
-                          for metric in ("precision", "recall", "f1", "ap50")),
+                          for metric in ("precision", "recall", "f1", "ap50", "ap")),
                     )
+                ]
+                bucket_values = [
+                    size_map[name] if size_map.get(name) is not None else "n/a"
+                    for name in ("small", "medium", "large")
                 ]
                 log.writerow([
                     epoch + 1, lr, *means[:4], means[4],
@@ -379,7 +436,7 @@ def run_training(config: dict, *, epochs: int | None = None,
                     val_loss["foreground"],
                     validation["precision"], validation["recall"], validation["f1"],
                     validation["micro_precision"], validation["micro_recall"],
-                    validation["micro_f1"], map50, *class_values,
+                    validation["micro_f1"], map50, map50_95, *bucket_values, *class_values,
                 ])
                 csv_file.flush()
                 state = {"epoch": epoch + 1, "model": model.state_dict(),
@@ -401,7 +458,7 @@ def run_training(config: dict, *, epochs: int | None = None,
                     f"cls {val_loss['cls']:.4f}  dfl {val_loss['dfl']:.4f}\n"
                     f"  Scores P {validation['precision']:.3f}  "
                     f"R {validation['recall']:.3f}  F1 {validation['f1']:.3f}  "
-                    f"mAP50 {map50:.3f}", flush=True
+                    f"mAP50 {map50:.3f}  mAP50-95 {map50_95:.3f}", flush=True
                 )
                 if patience is not None and patience > 0 and epoch + 1 - best_epoch >= patience:
                     print(f"early stop: no validation mAP@0.5 improvement for {patience} epochs",
