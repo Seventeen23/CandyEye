@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from candyeye.core.backbone_mobilenet import MobileNetV3SmallDetector
 from candyeye.core.convert_yolo11 import load_official_state_dict, load_weights, remap_prefix
 from candyeye.core import CandyEye
-from candyeye.data.transforms import Compose, HSVJitter, RandomHorizontalFlip
+from candyeye.data.transforms import Compose, HSVJitter, RandomAffine, RandomHorizontalFlip
 from candyeye.data.yolo import YoloTxtDataset
 from candyeye.data.voc import VOC_CLASSES, VOCDataset, collate_fn
 from candyeye.eval.detection_metrics import evaluate_detector
@@ -35,6 +35,64 @@ def resolve_threads(threads: int | None = None) -> int:
     if threads is None:
         return os.cpu_count() or 4
     return max(1, int(threads))
+
+
+# Training profiles: "a" (default) = YOLO11n + P2 small-object head, "b" =
+# small-object heads only (P2/P3/P4), "c" = stock YOLO11n (fastest). A profile
+# selects the bundled architecture and sensible training defaults; everything
+# can still be overridden per call/config.
+PROFILES: dict[str, dict] = {
+    "a": {"cfg": "yolo11_p2", "default_imgsz": 320, "scale_jitter": (0.5, 1.5)},
+    "b": {"cfg": "yolo11_p2_small", "default_imgsz": 320, "scale_jitter": None},
+    "c": {"cfg": "yolo11", "default_imgsz": 128, "scale_jitter": None},
+}
+
+
+def resolve_profile(profile: str) -> dict:
+    """Validate a profile name and return its defaults."""
+    if profile not in PROFILES:
+        raise ValueError(
+            f"unknown training profile {profile!r} (have {sorted(PROFILES)})")
+    return PROFILES[profile]
+
+
+class EMA:
+    """Exponential moving average of model weights, evaluated at validation.
+
+    A frozen copy of the model whose parameters and buffers follow the live
+    weights with ``decay`` (with a standard warm-up factor for the first
+    steps). Validation, checkpoint saving, and prediction use the averaged
+    weights while the live weights keep updating — a near-free, stable
+    accuracy boost with no wall-clock cost.
+    """
+
+    def __init__(self, model: torch.nn.Module, decay: float = 0.999):
+        self.decay = decay
+        device = next(model.parameters()).device
+        self.averaged_model = copy.deepcopy(model).to(device)
+        for param in self.averaged_model.parameters():
+            param.requires_grad_(False)
+        self.updates = 0
+
+    def update(self, model: torch.nn.Module) -> None:
+        with torch.no_grad():
+            decay = min(self.decay, (1 + self.updates) / (10 + self.updates))
+            for ema_param, param in zip(self.averaged_model.parameters(),
+                                        model.parameters()):
+                ema_param.data.mul_(decay).add_(param.data, alpha=1 - decay)
+            for ema_buffer, buffer in zip(self.averaged_model.buffers(),
+                                          model.buffers()):
+                ema_buffer.data.mul_(decay).add_(buffer.data, alpha=1 - decay)
+            self.updates += 1
+
+    def state_dict(self) -> dict:
+        return {"decay": self.decay, "updates": self.updates,
+                "model": copy.deepcopy(self.averaged_model.state_dict())}
+
+    def load_state_dict(self, state: dict) -> None:
+        self.decay = float(state.get("decay", self.decay))
+        self.updates = int(state.get("updates", 0))
+        self.averaged_model.load_state_dict(state["model"])
 
 
 def _save_training_plots(metrics_path: Path, output: Path) -> Path | None:

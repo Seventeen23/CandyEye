@@ -1,0 +1,42 @@
+# CandyEye — training profile "b": small-object heads only (P2/P3/P4)
+#
+# Like configs/yolo11_p2.yaml but the P5 head is dropped: three detection
+# levels -> strides [4, 8, 16], channels 32/64/128. The stride-32 P5 neck
+# layers (20-22) remain but are not consumed by the head (negligible compute
+# at that resolution). Use when the data is small-object-heavy and there are
+# no large objects to justify a stride-32 head.
+# Entry format: [from, repeats, module, args] (see configs/yolo11.yaml).
+
+nc: 20
+scale: n
+
+backbone:
+  - [-1, 1, Conv, [64, 3, 2]]          # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]         # 1-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]  # 2
+  - [-1, 1, Conv, [256, 3, 2]]         # 3-P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]]  # 4
+  - [-1, 1, Conv, [512, 3, 2]]         # 5-P4/16
+  - [-1, 2, C3k2, [512, True]]         # 6
+  - [-1, 1, Conv, [1024, 3, 2]]        # 7-P5/32
+  - [-1, 2, C3k2, [1024, True]]        # 8
+  - [-1, 1, SPPF, [1024, 5]]           # 9
+  - [-1, 2, C2PSA, [1024]]             # 10
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 11
+  - [[-1, 6], 1, Concat, [1]]                     # 12 cat backbone P4
+  - [-1, 1, C3k2, [512, False]]                   # 13
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 14
+  - [[-1, 4], 1, Concat, [1]]                     # 15 cat backbone P3
+  - [-1, 1, C3k2, [256, False]]                   # 16 P3/8 (small)
+  - [-1, 1, Conv, [256, 3, 2]]                    # 17 (dead: feeds P5 only)
+  - [[-1, 13], 1, Concat, [1]]                    # 18 (dead: feeds P5 only)
+  - [-1, 1, C3k2, [512, False]]                   # 19 P4/16 (medium)
+  - [-1, 1, Conv, [512, 3, 2]]                    # 20 (dead: feeds P5 only)
+  - [[-1, 10], 1, Concat, [1]]                    # 21 (dead: feeds P5 only)
+  - [-1, 1, C3k2, [1024, True]]                   # 22 (dead: feeds P5 only)
+  - [16, 1, nn.Upsample, [None, 2, "nearest"]]    # 23 upsample fused P3 x2
+  - [[-1, 2], 1, Concat, [1]]                     # 24 cat backbone P2 (64)
+  - [-1, 1, C3k2, [128, False]]                   # 25 P2/4 (32 after width)
+  - [[25, 16, 19], 1, Detect, [nc]]               # 26 P2/P3/P4, parallel

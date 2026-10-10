@@ -39,6 +39,45 @@ class HSVJitter:
         return image, boxes, labels, difficult
 
 
+class RandomAffine:
+    """Random scale + translate augmentation on a letterboxed square (no rotation).
+
+    Operates on the fixed ``size x size`` canvas produced by letterbox/mosaic:
+    the content is zoomed by a random ``scale`` factor and shifted by up to
+    ``translate`` (a fraction of the canvas) inside a border-padded canvas.
+    Boxes are remapped through the same affine; boxes that slide fully out of
+    the frame or shrink below a pixel floor are dropped.
+    """
+
+    def __init__(self, scale: tuple = (0.5, 1.5), translate: float = 0.1,
+                 border_value: int = 114):
+        self.scale = scale
+        self.translate = translate
+        self.border_value = border_value
+
+    def __call__(self, image, boxes, labels, difficult):
+        h, w = image.shape[:2]
+        s = np.random.uniform(*self.scale)
+        tx = np.random.uniform(-self.translate, self.translate) * w * s
+        ty = np.random.uniform(-self.translate, self.translate) * h * s
+        matrix = np.array([[s, 0.0, tx], [0.0, s, ty]], dtype=np.float32)
+        image = cv2.warpAffine(image, matrix, (w, h),
+                               flags=cv2.INTER_LINEAR,
+                               borderValue=self.border_value)
+        boxes = boxes.astype(np.float32, copy=True)
+        if len(boxes):
+            mapped = np.stack((boxes[:, [0, 2]] * s + tx,
+                               boxes[:, [1, 3]] * s + ty), axis=-1)
+            new_boxes = mapped.reshape(len(boxes), 4)
+            np.clip(new_boxes, 0.0, np.float32(w), out=new_boxes)
+            keep = ((new_boxes[:, 2] - new_boxes[:, 0] >= 1.0) &
+                    (new_boxes[:, 3] - new_boxes[:, 1] >= 1.0))
+            boxes = new_boxes[keep]
+            labels = labels[keep]
+            difficult = difficult[keep]
+        return image, boxes, labels, difficult
+
+
 class RandomHorizontalFlip:
     def __init__(self, probability: float = .5):
         self.probability = probability
