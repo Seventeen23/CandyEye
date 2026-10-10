@@ -92,23 +92,40 @@ class _Gate(nn.Module):
 class ScaleExchange(nn.Module):
     """Bidirectional, gated message passing between adjacent pyramid levels.
 
-    Input and output are lists of the same 3 feature maps
-    ``[P3, P4, P5]`` with identical shapes/channels, so the module drops in
+    Input and output are lists of feature maps (typically 3 or 4 levels)
+    with identical shapes/channels as produced by the neck, so the module drops in
     between an existing neck and the detection head.
     """
 
-    def __init__(self, c1: int, c2: int, c3: int, gate: str = "none",
-                 iters: int = 1, width: int | None = None):
+    def __init__(self, *args, gate: str | None = None, iters: int | None = None,
+                 width: int | None = None, **kwargs):
         super().__init__()
+        if kwargs:
+            raise TypeError(f"unexpected ScaleExchange arguments: {sorted(kwargs)}")
+        # Accept both keyword form (MobileNet: channels..., gate=, iters=) and
+        # the YAML-builder positional form (c1, c2, c3, gate, iters) for any
+        # number of pyramid levels. A bare trailing int is a channel count, so
+        # iters is only read positionally right after a positional gate.
+        values = list(args)
+        if gate is None and values and isinstance(values[-1], str):
+            gate = values.pop(-1)
+            if (iters is None and values
+                    and isinstance(values[-1], int) and not isinstance(values[-1], bool)):
+                iters = values.pop(-1)
+        if len(values) < 2:
+            raise ValueError(
+                f"ScaleExchange expects at least 2 channel counts, got {len(values)}")
+        self.channels = tuple(int(c) for c in values)
+        gate = "none" if gate is None else str(gate)
         if gate not in _GATE_MODES:
             raise ValueError(f"unknown exchange gate {gate!r} (have {_GATE_MODES})")
+        iters = 1 if iters is None else int(iters)
         if iters < 1:
             raise ValueError(f"iters must be >= 1, got {iters}")
-        self.channels = (c1, c2, c3)
         self.gate = gate
         self.iters = iters
 
-        self.pairs = [(0, 1), (1, 2)]
+        self.pairs = [(i, i + 1) for i in range(len(self.channels) - 1)]
         self.message_down = nn.ModuleList()
         self.message_up = nn.ModuleList()
         self.gate_down = nn.ModuleList()
@@ -137,8 +154,8 @@ class ScaleExchange(nn.Module):
         return out
 
     def forward(self, feats: list[torch.Tensor]) -> list[torch.Tensor]:
-        if len(feats) != 3:
-            raise ValueError(f"ScaleExchange expects 3 feature maps, got {len(feats)}")
+        if len(feats) != len(self.channels):
+            raise ValueError(f"ScaleExchange expects {len(self.channels)} feature maps, got {len(feats)}")
         out = list(feats)
         for _ in range(self.iters):
             out = self._step(out)
