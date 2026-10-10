@@ -82,8 +82,10 @@ class EMA:
                 ema_param.data.mul_(decay).add_(param.data, alpha=1 - decay)
             for ema_buffer, buffer in zip(self.averaged_model.buffers(),
                                           model.buffers()):
-                ema_buffer.data.mul_(decay).add_(buffer.data, alpha=1 - decay)
-            self.updates += 1
+                if ema_buffer.dtype.is_floating_point:
+                    ema_buffer.data.mul_(decay).add_(buffer.data, alpha=1 - decay)
+                else:
+                    ema_buffer.data.copy_(buffer.data)
 
     def state_dict(self) -> dict:
         return {"decay": self.decay, "updates": self.updates,

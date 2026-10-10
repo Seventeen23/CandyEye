@@ -160,52 +160,9 @@ architecture claim.
 - Full YOLO11 neck (SPPF + C2PSA + C3k2) on the MobileNet backbone as an opt-in accuracy experiment (default stays the light FPN)
 - Instance segmentation heads (YOLACT-style prototype masks), revisit if needed
 
-### Adaptive cross-scale exchange — ablation run (closed)
+### Adaptive cross-scale exchange — follow-up
 
-**Status:** neck implemented *and* the controlled comparison executed
-(2026-10-10). Verdict: **no detection-quality improvement over the plain neck**;
-the exchange only adds CPU latency and parameters. It stays an optional,
-off-by-default experiment — not a claimed contribution.
-
-**What was run.** Four arms share the YOLO11n backbone, dataloader,
-augmentation, image size (128), schedule (30 epochs, AdamW lr 1e-4, 3-epoch
-warmup + cosine), seed 23, and use the `valid` split for model selection; the
-`test` split is reported once. Arms differ only in the neck
-(`configs/experiments/isda_*.yaml`, `core/modules/exchange.py`).
-
-| Arm | Neck | Val mAP@0.5 (best ep) | Val mAP@0.5:0.95 | Test mAP@0.5 | Test mAP@0.5:0.95 | Params | GFLOPs@128 | CPU lat. |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| baseline | fixed FPN/PAN | 0.8994 | 0.6818 | 0.8923 | 0.6815 | 2.59 M | 0.253 | 49.3 ms |
-| exchange-none | ungated (fixed 0.5 mix) | 0.8623 | 0.6674 | 0.9044 | 0.6727 | 2.69 M | 0.263 | 60.0 ms |
-| exchange-static | learnable per-channel gate | 0.9013 | 0.6853 | 0.9030 | 0.6831 | 2.69 M | 0.263 | 66.3 ms |
-| exchange-dynamic | content-conditioned gate | 0.8967 | 0.6926 | 0.8952 | 0.6797 | 2.83 M | 0.263 | 59.2 ms |
-
-Latency is a 100-run mean after warmup on 8 CPU threads (`scripts/benchmark.py`,
-`runs/benchmark.csv`); test numbers from `scripts/evaluate.py`
-(`runs/eval/isda_exchange_ablation.csv`). The four arms trained concurrently, so
-the per-arm wall time (~3.0-3.2 h) is contention-inflated and not a clean
-single-run time.
-
-**Reading the result.** The three exchange arms land within ±0.012 mAP@0.5 of
-the baseline, in *both* directions and with no consistent winner: `static` edges
-ahead on validation and on test mAP@0.5:0.95, `none` leads test mAP@0.5 but
-trails validation, and `dynamic` trails the baseline on both. None of the gaps
-exceeds the spread expected from a single seed, so **no improvement is
-demonstrated**. The only consistent effect is cost: +97k-236k params, +0.01
-GFLOPs, and +10-17 ms (up to +34%) CPU latency at 128px. The small-object half of
-the hypothesis is untestable on this dataset — the size-bucket evaluation reports
-`small = 0.0` and `medium = n/a`; every labelled fish is `large`.
-
-**Honest framing / related work.** Content-conditioned, gated cross-scale fusion
-is well established. BiFPN (EfficientDet) learns scalar fusion weights; ASFF
-learns spatial per-level weight maps; Gated Fully Fusion applies pixelwise gates
-across levels; DyFPN and the Fine-Grained Dynamic Head use input-dependent gates
-to combine FPN scales; RetinaGate (2025) is a gated FPN for the same multi-scale
-problem. `ScaleExchange` is an engineering variant — a cheap depthwise-
-bottlenecked, near-closed-initialised post-neck drop-in — **not a new
-mechanism**, and this ablation does not support an accuracy claim for it.
-
-**Next steps if pursued.** (1) Repeat across ≥3 seeds; the deltas are at noise
-level. (2) Test on a dataset with genuine small objects (COCO, or VOC at 640px)
-to exercise the small-object hypothesis. (3) Longer/leaner gate schedules — the
-near-closed init may starve the exchange of gradient signal early.
+- [ ] **Spatially-selective gating.** Experiment with a lightweight **1×1 spatial gate** (H×W×1 per adjacent pair) instead of the current global per-channel dynamic gate. Goal: retain CPU efficiency while improving small-object handling. 
+- [ ] **Gate initialization & warm-start.** Test bias values (-3.0, -2.5, -2.0) vs current -4.0 (σ~0.018). Consider gate LR/warmup or freezing gates briefly to avoid starving exchange early. No extra FLOPs.
+- [ ] **Budgeted sparse exchange (research track).** Build a tiny router over adjacent pairs (none/P2↔P3/P3↔P4/P4↔P5 depending on profile). Top-1 selection, straight-through/Gumbel-softmax, with a **CPU-ms budget penalty** (measured, not FLOPs). Must remain ONNX-friendly (prefer static-per-input-scale over per-batch). Only pursue if spatial gating shows a per-size benefit.
+- [ ] **Evaluation requirements.** For any exchange variant claiming improvement: test on a **small-object dataset** (COCO subset or VOC@320) with profile a (P2/P3/P4/P5), report **per-size AP (small/medium/large)**, run **≥3 seeds sequentially** (avoid CPU contention), and compare against baseline and current dynamic neck using **accuracy/CPU-ms Pareto** (end-to-end CPU ms including decode+NMS), not FLOPs alone.  (Matches RetinaGate insight: gains size-dependent; Isda all-large explains prior neutral result.)
