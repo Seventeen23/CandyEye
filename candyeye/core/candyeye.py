@@ -113,7 +113,10 @@ def parse_model(data: dict) -> nn.Sequential:
                 args.insert(2, n)  # repeats slot inside the block
                 n = 1
         elif m == "nn.Upsample":
-            c2 = cur
+            if isinstance(f, int) and f >= 0:
+                c2 = ch[f]
+            else:
+                c2 = cur
         elif m == "Concat":
             c2 = sum(cur if x == -1 else ch[x] for x in f)
         elif m == "Detect":
@@ -125,7 +128,7 @@ def parse_model(data: dict) -> nn.Sequential:
             in_ch = _source_channels(src, cur, ch)
             gate = str(args[0]) if args else "none"
             iters = int(args[1]) if len(args) > 1 else 1
-            args = [*in_ch, gate, iters]
+            args = list(in_ch) + [gate, iters]
             c2 = list(in_ch)  # this layer emits a channel *list*
         else:
             raise ValueError(f"unhandled module {m!r}")
@@ -133,6 +136,9 @@ def parse_model(data: dict) -> nn.Sequential:
         module_cls = _MODULE_MAP[m]
         if m == "Detect":
             module = module_cls(nc=args[0], ch=args[1])
+        elif m == "ScaleExchange":
+            channels, gate, iters = args[:-2], args[-2], args[-1]
+            module = module_cls(*channels, gate=gate, iters=iters)
         elif n > 1:
             module = nn.Sequential(*(copy.deepcopy(module_cls(*args)) for _ in range(n)))
         else:
