@@ -89,6 +89,16 @@ are the same three feature maps, so it drops in without changing the head or
 the channel counts. The MobileNet model exposes the same neck via
 `neck: exchange`, `exchange_gate`, and `exchange_iters`.
 
+**Measured outcome (2026-10-10, Isda 9-class, seed 23, 30 epochs, test split):
+none of the gate modes improved detection over the plain neck** — test mAP@0.5
+stays within ±0.012 of baseline in both directions (0.892 / 0.904 / 0.903 /
+0.895 for baseline / none / static / dynamic), while each arm adds ~4% FLOPs,
++97k-236k params, and +10-17 ms CPU latency at 128×128. The neck is kept as an
+opt-in ablation component, not a recommended default, and is not claimed as a
+novel contribution (gated cross-scale fusion is established: BiFPN, ASFF, GFF,
+DyFPN, RetinaGate). The module supports any number of pyramid levels (3 or 4);
+no config currently uses a fourth (P2, stride 4) detection level.
+
 The extra layer shifts Detect from index 23 to 24, so `candyeye.core.convert_yolo11`'s
 `remap_prefix` re-keys the official head weights when initializing from the
 default `yolo11n` checkpoint (see

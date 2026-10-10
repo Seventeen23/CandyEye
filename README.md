@@ -33,7 +33,7 @@ Three design ideas, one borrowed from each reference model:
 | Training | CPU-only (laptop, 8 cores) |
 | Inference | ONNX Runtime, CPU; INT8 quantization optional |
 | Dataset | PASCAL VOC 2007 (20 classes): trainval 5011 / test 4952 |
-| Latency | < 10 ms/image @ 128px (TBD in Phase 8) |
+| Latency | < 10 ms/image @ 128px (target, Phase 8; fp32 eager measured **49.3 ms** on 8 CPU threads — target unmet until ONNX Runtime / INT8) |
 | Accuracy | mAP@0.5 baseline TBD after first training run |
 
 ## Experiments
@@ -60,14 +60,33 @@ depthwise message whose admission is controlled by a gate:
 | `static` | `sigmoid(learnable per-channel weight + bias)` — BiFPN-like |
 | `dynamic` | gate computed at runtime from the two feature maps — content-conditioned |
 
-The `dynamic` gate is the intended contribution: unlike BiFPN's fixed learned
-scalar weights, the amount of exchange adapts per input. Gates initialize
+The `dynamic` gate is content-conditioned: unlike BiFPN's fixed learned scalar
+weights, its weights are computed at runtime from the features. Gates initialize
 near-closed (`bias -4.0`), so an exchange model starts close to the plain
 baseline. The neck is selectable through the architecture YAML
 (`configs/yolo11_exchange.yaml`, layer 23) and as a `neck: exchange` option on
 the MobileNet model, with experiment configs under `configs/experiments/`
 (`isda_baseline`, `isda_exchange_{none,static,dynamic}`, and the
 `isda_mobilenet_*` variants).
+
+**Result (seed 23, 30 epochs, Isda 9-class, `valid` for selection / `test`
+reported once).** The exchange neck did **not** improve detection over the plain
+neck — all three arms land within ±0.012 mAP@0.5 of the baseline, in both
+directions and with no consistent winner:
+
+| Neck | Test mAP@0.5 | Test mAP@0.5:0.95 | Params | CPU lat. |
+|---|---:|---:|---:|---:|
+| baseline (fixed FPN/PAN) | 0.8923 | 0.6815 | 2.59 M | 49.3 ms |
+| `none` | 0.9044 | 0.6727 | 2.69 M | 60.0 ms |
+| `static` | 0.9030 | 0.6831 | 2.69 M | 66.3 ms |
+| `dynamic` | 0.8952 | 0.6797 | 2.83 M | 59.2 ms |
+
+The only consistent effect is cost (+10-17 ms, up to +34% CPU latency at 128px).
+The small-object hypothesis is untestable here (size-bucket eval reports
+`small = 0.0`, `medium = n/a`; every labelled fish is `large`). Gated
+cross-scale fusion is an established idea (BiFPN, ASFF, Gated Fully Fusion,
+DyFPN, RetinaGate); this neck is an engineering variant, not a new mechanism,
+and remains opt-in. Full details: [ROADMAP.md](ROADMAP.md#adaptive-cross-scale-exchange--ablation-run-closed).
 
 ## Install
 

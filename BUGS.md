@@ -154,3 +154,35 @@ Per user scope (HIGH + MEDIUM), the following were not changed: loss batch-size 
 - `core/candyeye.py` — stride probe in eval/decode=False
 - `README.md`, `configs/default.yaml` — docs/notes
 - `tests/*` — new tests + one small extension to existing tests
+
+---
+
+## Addendum (2026-10-10) — ScaleExchange N-level refactor
+
+### H5 — `ScaleExchange` positional parsing ate a trailing channel as `iters`
+**Locations:** `candyeye/core/modules/exchange.py` (`__init__`),
+`candyeye/core/candyeye.py` (`parse_model`).
+
+**Problem:** the in-flight refactor from a fixed 3-level signature
+(`c1, c2, c3, gate="none", iters=1`) to arbitrary level counts made the
+constructor guess that *any* trailing int was `iters`. That is ambiguous when a
+gate is given by keyword or omitted: a 4-level channel list such as
+`ScaleExchange(64, 128, 256, 32)` was parsed as `channels=(64,128,256)` with
+`iters=32` — silently dropping the finest (P2-class) level. `parse_model`
+also spliced the gate/iters into a positional arg list, which further confused
+the heuristic. Symptom in tests: wrong channel counts / `iters` for positional
+and keyword call sites (test failures, no silent corruption in memory because
+the channel mismatch surfaced on the first forward).
+
+**Fix:** the constructor accepts both keyword form (`channels..., gate=, iters=`)
+and the YAML-positional form (`channels..., gate, iters`); `iters` is read from
+the positional tail **only** when it immediately follows a positional gate
+string, so a bare trailing int is always a channel. `parse_model` now constructs
+`ScaleExchange(*channels, gate=gate, iters=iters)` with explicit keywords.
+Full suite: 60 passed.
+
+### Extra hunk (pre-existing, working tree)
+`nn.Upsample` in `parse_model` now resolves `c2 = ch[f]` when `f` is a
+non-negative absolute reference (was always `cur`). Kept; no test contract
+changed. **Not** from this session's changes — was already uncommitted in the
+working tree.

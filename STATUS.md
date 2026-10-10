@@ -3,7 +3,10 @@
 **Phase 6: Evaluation — IN PROGRESS (Phase 5 full runs remain pending)**
 **Packaging: v0.1.0 prepared** — installable wheel + sdist, CI, and a PyPI
 publish workflow; upload still pending.
-Last updated: 2026-10-09
+**Cross-scale exchange ablation — COMPLETE (2026-10-10):** 4-arm, 30-epoch,
+seed-23 run shows no accuracy gain over the plain neck (+10-17 ms CPU latency);
+kept opt-in, no originality claim (see [ROADMAP.md](ROADMAP.md#adaptive-cross-scale-exchange--ablation-run-closed)).
+Last updated: 2026-10-10
 
 ---
 
@@ -31,7 +34,7 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 | opencv / numpy / pillow | opencv-python-headless 5.0.0.93 · numpy 2.5.2 · pillow 12.3.0 |
 | extras | pyyaml 6.0.3, tqdm 4.70.1, pytest 9.1.1 |
 | Hardware | 8 CPU cores, 13 GB RAM (CPU-only training) |
-| Disk | ~17 GB free (needs ~3 GB total) |
+| Disk | ~9.7 GB free (disk 96% full; exchange runs need ~0.5 GB each) |
 | venv | `CandyEye/venv/` |
 | Remote | https://github.com/Seventeen23/CandyEye |
 
@@ -136,8 +139,13 @@ Bugs caught during build-out (all in `core/candyeye.py`, now fixed):
    comparable mAP values.
 3. Publish `v0.1.0` — run the **Publish** workflow with `target: pypi`, or push
    a `v*` tag (the tag path also needs the TestPyPI trusted publisher).
-4. Run the Isda 9-class exchange ablation and fold the results into the README
-   experiments table.
+4. ~~Run the Isda 9-class exchange ablation and fold the results into the README
+   experiments table.~~ **DONE (2026-10-10)** — 4 arms (baseline /
+   exchange-none / exchange-static / exchange-dynamic) trained 30 epochs at seed
+   23. No accuracy improvement: test mAP@0.5 = 0.892 / 0.904 / 0.903 / 0.895;
+   +10-17 ms CPU latency and +97k-236k params. Results in ROADMAP.md + README.
+   Follow-up: multi-seed repeat, and a small-object dataset (hypothesis
+   untestable here — no `small` predictions).
 
 ## Phase 2 checklist
 

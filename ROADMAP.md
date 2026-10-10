@@ -122,8 +122,9 @@ the shared anchor-free parallel `Detect` head (see Phase 9).
 - [ ] `torch.onnx.export` for all three configs
 - [ ] Parity test: PyTorch vs ONNX Runtime (max abs diff)
 - [x] PyTorch params / GFLOPs / CPU-latency table (`scripts/benchmark.py`)
-- [ ] Latency benchmark @ 128px (median, warmup) — target < 10 ms
+- [x] Latency benchmark @ 128px (100-run mean after warmup, 8 CPU threads, fp32 eager) — measured **baseline 49.3 ms** (exchange arms 59-66 ms); the < 10 ms target is unmet at fp32 and deferred to ONNX Runtime / INT8 (see below)
 - [ ] Model size table (FP32 / INT8)
+- [ ] ONNX Runtime / INT8 latency follow-up — fp32 eager is ~5× over target; expect the bulk of the < 10 ms goal to come from `torch.onnx.export` + optional INT8 quantization
 - [ ] (optional) INT8 dynamic quantization + mAP delta
 
 ## Phase 9 — Unified detector family
@@ -159,35 +160,52 @@ architecture claim.
 - Full YOLO11 neck (SPPF + C2PSA + C3k2) on the MobileNet backbone as an opt-in accuracy experiment (default stays the light FPN)
 - Instance segmentation heads (YOLACT-style prototype masks), revisit if needed
 
-### Proposed research direction: molecular-inspired adaptive scale exchange
+### Adaptive cross-scale exchange — ablation run (closed)
 
-**Status:** neck implemented (`core/modules/exchange.py`, `ScaleExchange` with
-`none`/`static`/`dynamic` gates, wired into `configs/yolo11_exchange.yaml` and
-the MobileNet `neck: exchange` option). The Isda ablation configs exist
-(`configs/experiments/isda_*`); running the controlled comparison and any
-originality claim are still pending.
+**Status:** neck implemented *and* the controlled comparison executed
+(2026-10-10). Verdict: **no detection-quality improvement over the plain neck**;
+the exchange only adds CPU latency and parameters. It stays an optional,
+off-by-default experiment — not a claimed contribution.
 
-The fructose/glucose analogy can motivate a design principle: local interactions
-between feature scales should combine into a useful global representation. Treat
-P3/P4/P5 as interacting feature groups. Let neighboring scales exchange
-lightweight depthwise/pointwise feature messages, with learned gates controlling
-how much information is passed. Keep the existing YOLO-style backbone option,
-decoupled detection head, loss, and training workflow so the new neck remains an
-optional experiment rather than a setup-breaking fork.
+**What was run.** Four arms share the YOLO11n backbone, dataloader,
+augmentation, image size (128), schedule (30 epochs, AdamW lr 1e-4, 3-epoch
+warmup + cosine), seed 23, and use the `valid` split for model selection; the
+`test` split is reported once. Arms differ only in the neck
+(`configs/experiments/isda_*.yaml`, `core/modules/exchange.py`).
 
-The molecular idea is a metaphor for adaptive local interaction, not a physical
-simulation. Cross-scale fusion and gating are established research directions;
-review related work before making any originality claim.
+| Arm | Neck | Val mAP@0.5 (best ep) | Val mAP@0.5:0.95 | Test mAP@0.5 | Test mAP@0.5:0.95 | Params | GFLOPs@128 | CPU lat. |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline | fixed FPN/PAN | 0.8994 | 0.6818 | 0.8923 | 0.6815 | 2.59 M | 0.253 | 49.3 ms |
+| exchange-none | ungated (fixed 0.5 mix) | 0.8623 | 0.6674 | 0.9044 | 0.6727 | 2.69 M | 0.263 | 60.0 ms |
+| exchange-static | learnable per-channel gate | 0.9013 | 0.6853 | 0.9030 | 0.6831 | 2.69 M | 0.263 | 66.3 ms |
+| exchange-dynamic | content-conditioned gate | 0.8967 | 0.6926 | 0.8952 | 0.6797 | 2.83 M | 0.263 | 59.2 ms |
 
-**Testable hypothesis:** adaptive cross-scale exchange improves validation
-detection quality, especially for small objects, at an acceptable increase in
-CPU latency and model size compared with the current fixed-fusion neck.
+Latency is a 100-run mean after warmup on 8 CPU threads (`scripts/benchmark.py`,
+`runs/benchmark.csv`); test numbers from `scripts/evaluate.py`
+(`runs/eval/isda_exchange_ablation.csv`). The four arms trained concurrently, so
+the per-arm wall time (~3.0-3.2 h) is contention-inflated and not a clean
+single-run time.
 
-**Suggested experiment:** expose the neck as a config choice while keeping the
-current neck as the default. Compare (1) the current neck, (2) the proposed
-exchange without gates, and (3) the gated exchange. Keep data splits, image size,
-training schedule, and seeds consistent; use a validation split from training
-data for model selection and reserve the test split for final results. Report
-mAP@0.5 and mAP@0.5:0.95, with small-object results where available, parameter
-count, compute, CPU inference latency, and time to train. Repeat promising
-comparisons across multiple seeds before drawing conclusions.
+**Reading the result.** The three exchange arms land within ±0.012 mAP@0.5 of
+the baseline, in *both* directions and with no consistent winner: `static` edges
+ahead on validation and on test mAP@0.5:0.95, `none` leads test mAP@0.5 but
+trails validation, and `dynamic` trails the baseline on both. None of the gaps
+exceeds the spread expected from a single seed, so **no improvement is
+demonstrated**. The only consistent effect is cost: +97k-236k params, +0.01
+GFLOPs, and +10-17 ms (up to +34%) CPU latency at 128px. The small-object half of
+the hypothesis is untestable on this dataset — the size-bucket evaluation reports
+`small = 0.0` and `medium = n/a`; every labelled fish is `large`.
+
+**Honest framing / related work.** Content-conditioned, gated cross-scale fusion
+is well established. BiFPN (EfficientDet) learns scalar fusion weights; ASFF
+learns spatial per-level weight maps; Gated Fully Fusion applies pixelwise gates
+across levels; DyFPN and the Fine-Grained Dynamic Head use input-dependent gates
+to combine FPN scales; RetinaGate (2025) is a gated FPN for the same multi-scale
+problem. `ScaleExchange` is an engineering variant — a cheap depthwise-
+bottlenecked, near-closed-initialised post-neck drop-in — **not a new
+mechanism**, and this ablation does not support an accuracy claim for it.
+
+**Next steps if pursued.** (1) Repeat across ≥3 seeds; the deltas are at noise
+level. (2) Test on a dataset with genuine small objects (COCO, or VOC at 640px)
+to exercise the small-object hypothesis. (3) Longer/leaner gate schedules — the
+near-closed init may starve the exchange of gradient signal early.

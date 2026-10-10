@@ -6,6 +6,7 @@ SPECS.md
 data/downloads/
 data/test_data/
 data/VOCdevkit/
+research/
 *.egg-info/
 runs/
 weights/

@@ -3,6 +3,38 @@
 All notable changes to this project will be documented in this file.  
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`ScaleExchange` N-level parsing** — the constructor now distinguishes the
+  keyword form (`channels..., gate=, iters=`) from the positional YAML form
+  (`channels..., gate, iters`); a bare trailing int is treated as a channel, not
+  `iters`, so a 4th level (e.g. `64, 128, 256, 32`) no longer misparses.
+  `parse_model` builds the module with explicit `gate=` / `iters=` keywords.
+- **`nn.Upsample` channel resolution** — `c2` now resolves against the source
+  level (`ch[f]`) when `f` is a non-negative absolute reference instead of
+  always using the current channel count.
+
+### Changed
+
+- **Exchange neck result recorded as negative.** The controlled four-arm
+  ablation (baseline / none / static / dynamic, Isda 9-class, seed 23, 30
+  epochs) showed no detection-quality gain — all arms within ±0.012 mAP@0.5 of
+  baseline, no consistent winner across mAP@0.5 and mAP@0.5:0.95 — at +~4%
+  FLOPs, +97k-236k params, and +10-17 ms CPU latency. README / ROADMAP / STATUS
+  / ARCHITECTURE updated to report this honestly; the neck stays opt-in and is
+  not claimed as a contribution.
+- **Latency target corrected in README** — fp32 eager PyTorch measures ~49 ms
+  at 128×128 on 8 CPU threads; the < 10 ms goal is deferred to ONNX Runtime /
+  INT8 work in Phase 8.
+
+### Added
+
+- `research/scale_exchange_paper_draft.md` — result tables, per-class AP,
+  ablation reading, Discussion, and Conclusion filled from the measured run,
+  with single-seed / provenance caveats retained.
+
 ## [0.1.0] — 2026-10-09
 
 First public release: a lightweight, CPU-first object detector.
