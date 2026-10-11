@@ -86,7 +86,10 @@ The small-object hypothesis is untestable here (size-bucket eval reports
 `small = 0.0`, `medium = n/a`; every labelled fish is `large`). Gated
 cross-scale fusion is an established idea (BiFPN, ASFF, Gated Fully Fusion,
 DyFPN, RetinaGate); this neck is an engineering variant, not a new mechanism,
-and remains opt-in. Full details: [ROADMAP.md](ROADMAP.md#adaptive-cross-scale-exchange--ablation-run-closed).
+and remains opt-in. The follow-up re-designs the gate as a **spatially-selective
+1×1 gate** (region-level admission, not a global scalar) and re-tests on a
+small-object dataset with per-size AP and a measured CPU-ms Pareto — see
+[ROADMAP.md](ROADMAP.md#adaptive-cross-scale-exchange--follow-up).
 
 ## Install
 
@@ -101,8 +104,9 @@ For a CPU-only PyTorch wheel (recommended on laptops):
 pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 ```
 
-The wheel bundles the default `yolo11`/`yolo11_exchange` architecture configs, so
-`CandyEye()` works with no checkout and no download. The clean `yolo11n` weights
+The wheel bundles the default `yolo11`, `yolo11_p2`, `yolo11_p2_small`, and
+`yolo11_exchange` architecture configs, so `CandyEye()` works with no checkout
+and no download. The clean `yolo11n` weights
 are **not** shipped in the wheel or sdist (they derive from Ultralytics'
 AGPL-3.0 checkpoints): a fresh install downloads the official checkpoint on the
 first `train(..., pretrained=True)` and caches a clean state_dict under
@@ -114,14 +118,18 @@ directly for offline dev/tests. Install the optional converter with
 ## Training
 
 Training is available through CandyEye's Python API. The model config defines
-the architecture (bundled names such as `"yolo11"` or `"yolo11_exchange"`, a
-YAML path, or a parsed dict); the data YAML points to your dataset and split
-names.
+the architecture (bundled names such as `"yolo11"`, `"yolo11_p2"`, or
+`"yolo11_exchange"`, a YAML path, or a parsed dict); the data YAML points to
+your dataset and split names.
+
+CandyEye is designed to be used as a **library** from any directory. The
+patterns below work whether you run inside the repo (with the venv) or install
+the wheel — only the `data`/`weights` paths need to point at real files.
 
 ```python
 from candyeye import CandyEye
 
-model = CandyEye()  # bundled yolo11 architecture
+model = CandyEye()  # bundled yolo11 architecture (P3/P4/P5)
 results = model.train(
     data="dataset.yaml",
     epochs=100,
@@ -135,6 +143,60 @@ results = model.train(
 )
 print(results["best"])
 ```
+
+### Profiles
+
+`profile` selects a named architecture/strides bundle and its augmentation
+defaults; it defaults to **`a`**.
+
+| Profile | Bundled config | Levels (strides) | Intended use |
+|---|---|---|---|
+| `a` (default) | `yolo11_p2` | P2/P3/P4/P5 (4/8/16/32) | general model; small objects included |
+| `b` | `yolo11_p2_small` | P2/P3/P4 (4/8/16) | small-object only; drops the large head |
+| `c` | `yolo11` | P3/P4/P5 (8/16/32) | fastest; stock YOLO11n neck |
+
+Profile defaults are applied only when you don't override them: profile `a`
+enables scale-jitter `(0.5, 1.5)` by default. Measured params/FLOPs/latency for
+each profile at 128/320/640 are in [MODEL_SPECS.md](MODEL_SPECS.md).
+
+### EMA, scale jitter, and resume
+
+- **EMA** (`ema=True`, default): keeps a decayed copy of the weights
+  (decay `0.999` with a warm-up factor) that is used for validation,
+  `best.pt` selection, and inference. It is near-free and improves stability
+  on small/medium datasets. Disable with `ema=False`.
+- **Scale jitter** (`scale_jitter=(lo, hi)`): `RandomAffine` scale+translate
+  augmentation applied on the letterboxed canvas (no rotation). Defaults to
+  `(0.5, 1.5)` for profile `a`; pass `scale_jitter=None` to disable.
+- Checkpoints store both the live weights (`model`) and the EMA weights
+  (`ema`); `CandyEyePredictor` prefers `ema` when present. `resume=True`
+  (or a checkpoint path) restores the live weights and EMA state.
+
+```python
+from candyeye import CandyEye
+
+# Profile a (P2/P3/P4/P5) with EMA on and explicit scale jitter
+model = CandyEye("yolo11_p2")
+results = model.train(
+    data="dataset.yaml",
+    profile="a",
+    epochs=100,
+    imgsz=320,
+    batch=16,
+    ema=True,                  # default
+    scale_jitter=(0.5, 1.5),   # profile-a default
+    pretrained="weights/yolo11n.pth",  # bool True, or a .pth/.pt path
+    workers=4,                 # persistent_workers + prefetch_factor set automatically
+    project="runs/train",
+    name="isda_a",
+)
+print(results["best"])
+```
+
+> **Workers note:** `workers>0` uses the forkserver start method. Run training
+> from a real script guarded by `if __name__ == "__main__":`, or use
+> `workers=0`, when calling inline (e.g. a REPL or `python -c`), to avoid a
+> `ConnectionResetError` from the worker pool.
 
 This CPU-first trainer saves `best.pt`, `last.pt`, and `metrics.csv` in the
 run directory. Each epoch reports train and validation total, box,
@@ -164,26 +226,28 @@ history remains available as `metrics.csv`.
 
 ### Run a trained model on an image or video
 
-Use the Python predictor with an image path or video path. It loads class names
-from the dataset YAML and saves annotated output under `runs/predict/` by
-default:
+Use the Python predictor with an image path or video path. It rebuilds the
+model from the architecture recorded **inside the checkpoint** (so P2/exchange
+profiles load without you re-specifying the config), prefers the checkpoint's
+EMA weights when present, loads class names from the dataset YAML, and saves
+annotated output under `runs/predict/` by default:
 
 ```python
 from candyeye import CandyEyePredictor
 
 predictor = CandyEyePredictor(
-    weights="runs/train/fruit_smoke_test/best.pt",
-    data="data/test_data/fruits.v5i.yolov11/data.yaml",
-    imgsz=128,
+    weights="runs/train/isda_a/best.pt",   # arch + imgsz read from checkpoint
+    data="dataset.yaml",                   # class names (and nc check)
+    imgsz=128,                             # optional override
 )
 
 # Run one image
 image_result = predictor.predict(
-    "data/test_data/fruits.v5i.yolov11/test/images/15_jpg.rf.bdcbfdcabfa19ea0ca4b42a986bcb604.jpg",
+    "test/images/sample.jpg",
     conf=0.25,
 )
-print(image_result["output"])
-print(image_result["detections"])
+print(image_result["output"])       # Path to annotated image
+print(image_result["detections"])   # [(class_id, score, [x1, y1, x2, y2]), ...]
 
 # Or run a video instead
 video_result = predictor.predict("/path/to/clip.mp4", conf=0.25)
@@ -191,16 +255,33 @@ print(video_result["output"], video_result["frames"])
 ```
 
 Pass `output="path/to/result.jpg"` (or an `.mp4` path for video) to choose a
-specific output file.
+specific output file. If the checkpoint records an architecture the predictor
+can't infer (or you want to force one), pass `cfg="yolo11_p2"` explicitly.
 
-For a function-style entry point:
+For a function-style entry point (creates the model and trains in one call;
+`profile` defaults to `"a"`):
 
 ```python
 from candyeye import train
 
-results = train(data="dataset.yaml", epochs=100, imgsz=128, batch=16,
-                patience=20, pretrained=True)
+results = train(
+    model="yolo11_p2",       # bundled name, YAML path, or dict
+    data="dataset.yaml",
+    profile="a",             # "a" (default) | "b" | "c"
+    epochs=100,
+    imgsz=320,
+    batch=16,
+    patience=20,
+    ema=True,
+    workers=4,
+    pretrained="weights/yolo11n.pth",
+    project="runs/train",
+    name="isda_a",
+)
+print(results["best"])       # Path to runs/train/isda_a/best.pt
 ```
+
+Run this from a script (not inline) when `workers>0`.
 
 ### Evaluation and benchmarking
 
@@ -258,7 +339,9 @@ CandyEye/
 │   ├── __init__.py             # public API: CandyEye, train, CandyEyePredictor
 │   ├── paths.py                # packaged config + weight resolution
 │   ├── configs/                # bundled architecture YAMLs (package data)
-│   │   ├── yolo11.yaml
+│   │   ├── yolo11.yaml         # profile c (P3/P4/P5)
+│   │   ├── yolo11_p2.yaml      # profile a (P2/P3/P4/P5, default)
+│   │   ├── yolo11_p2_small.yaml# profile b (P2/P3/P4)
 │   │   └── yolo11_exchange.yaml
 │   ├── assets/yolo11n.pth      # clean weights for dev/tests (not shipped in the wheel)
 │   ├── core/                   # model builder + nn.Module blocks

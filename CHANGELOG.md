@@ -5,8 +5,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Profiles** — `profile="a" | "b" | "c"` selects a bundled architecture/strides
+  bundle and its augmentation defaults; `a` (P2/P3/P4/P5, `yolo11_p2`) is the
+  default. New configs `candyeye/configs/yolo11_p2.yaml` (a) and
+  `yolo11_p2_small.yaml` (b); `PROFILES` / `resolve_profile()` in
+  `training/trainer.py`. P2 fusion is appended after the neck so pretrained
+  indices 0–22 stay unchanged (only Detect is remapped).
+- **EMA** — `EMA` (decay `0.999`, warm-up `(1+u)/(10+u)`, integer buffers
+  copied not averaged). Wired through training: updated after every optimizer
+  step, used for validation and `best.pt` selection, and saved as `ema` (+
+  `ema_enabled`, `updates`) alongside the live `model`. `ema=True` by default;
+  resume restores both.
+- **Scale jitter** — `RandomAffine` (scale + translate, no rotation) in
+  `data/transforms.py`; `scale_jitter=(lo, hi)` in the training API, defaulting
+  to `(0.5, 1.5)` for profile `a`.
+- **Library-first API** — `train(..., profile=, ema=, scale_jitter=)` and
+  `CandyEye.train(...)` forward all three; `CandyEyePredictor` rebuilds the
+  architecture from the checkpoint's saved config and prefers the checkpoint's
+  EMA weights. `persistent_workers` / `prefetch_factor` set automatically when
+  `workers>0`.
+
 ### Fixed
 
+- **`CandyEyePredictor` architecture mismatch** — the predictor now reads
+  `config.model.cfg` from the checkpoint when `cfg` is not passed, so
+  P2/exchange checkpoints no longer fail `load_state_dict` against the default
+  `yolo11` (3-head) graph.
 - **`ScaleExchange` N-level parsing** — the constructor now distinguishes the
   keyword form (`channels..., gate=, iters=`) from the positional YAML form
   (`channels..., gate, iters`); a bare trailing int is treated as a channel, not

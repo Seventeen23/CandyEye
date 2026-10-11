@@ -162,7 +162,59 @@ architecture claim.
 
 ### Adaptive cross-scale exchange — follow-up
 
-- [ ] **Spatially-selective gating.** Experiment with a lightweight **1×1 spatial gate** (H×W×1 per adjacent pair) instead of the current global per-channel dynamic gate. Goal: retain CPU efficiency while improving small-object handling. 
-- [ ] **Gate initialization & warm-start.** Test bias values (-3.0, -2.5, -2.0) vs current -4.0 (σ~0.018). Consider gate LR/warmup or freezing gates briefly to avoid starving exchange early. No extra FLOPs.
-- [ ] **Budgeted sparse exchange (research track).** Build a tiny router over adjacent pairs (none/P2↔P3/P3↔P4/P4↔P5 depending on profile). Top-1 selection, straight-through/Gumbel-softmax, with a **CPU-ms budget penalty** (measured, not FLOPs). Must remain ONNX-friendly (prefer static-per-input-scale over per-batch). Only pursue if spatial gating shows a per-size benefit.
-- [ ] **Evaluation requirements.** For any exchange variant claiming improvement: test on a **small-object dataset** (COCO subset or VOC@320) with profile a (P2/P3/P4/P5), report **per-size AP (small/medium/large)**, run **≥3 seeds sequentially** (avoid CPU contention), and compare against baseline and current dynamic neck using **accuracy/CPU-ms Pareto** (end-to-end CPU ms including decode+NMS), not FLOPs alone.  (Matches RetinaGate insight: gains size-dependent; Isda all-large explains prior neutral result.)
+**Why the first ablation was neutral:** the current gate is a *global,
+per-channel* scalar broadcast over the whole map (`sigmoid(w·[gap(F_i),gap(F_j)]
++b)`), and the Isda eval has no `small` objects (`small = 0.0`; every labelled
+fish is `large`). A global scalar cannot route exchange *where* it helps, so
+the only measured effect was CPU cost. The redesign below makes admission
+**spatial** (and, later, **budgeted**), then re-tests on a dataset that can
+actually show a per-size effect.
+
+#### Spatially-selective gate (proposed module)
+
+For each adjacent pair `(F_i, F_j)` at stride `s`, build a cheap H×W×1
+content-conditioned gate instead of H×W×C:
+
+```
+g = sigmoid( Conv1x1( ReLU( Conv1x1([F_i_down, F_j_up]) ) ) + b )   # H×W×1
+out_i = F_i + g * dw_exchange(F_j_up)                                # broadcast over C
+out_j = F_j + (1 - g) * dw_exchange(F_i_down)
+```
+
+- `dw_exchange` is a depthwise conv (no cross-channel cost); the gate uses two
+  1×1 convs to a single channel → `~C + 2` params per pair, negligible FLOPs.
+- Broadcast `g` over channels (not per-channel), so it selects *regions*, not
+  feature channels — the missing ingredient for small objects.
+- Keep it ONNX-friendly: fixed H/W per input size, no dynamic shapes, no
+  data-dependent branching.
+
+#### Gate initialization & warm-start
+
+- [ ] Sweep gate bias `b ∈ {-3.0, -2.5, -2.0}` vs current `-4.0` (σ≈0.018).
+- [ ] Optionally warm-start: freeze gates for the first N epochs (exchange off
+      ≈ baseline), then unfreeze — avoids starving the exchange path early.
+- [ ] No extra FLOPs; only changes the `sigmoid` operating point.
+
+#### Budgeted sparse exchange (research track, only if spatial gating helps)
+
+- [ ] Tiny router over adjacent pairs (depending on profile: `P2↔P3`,
+      `P3↔P4`, `P4↔P5`, or `none`). Top-1 / sparse selection via
+      straight-through or Gumbel-softmax.
+- [ ] Add a **measured CPU-ms budget penalty** to the objective (not FLOPs) so
+      the model pays for exchange only where it buys accuracy.
+- [ ] Prefer static-per-input-scale routing over per-batch (ONNX-friendly).
+
+#### Evaluation requirements
+
+Any exchange variant claiming improvement must:
+
+1. Test on a **small-object dataset** (COCO subset or VOC@320) using **profile
+   a** (P2/P3/P4/P5) so `small`/`medium` buckets are non-empty.
+2. Report **per-size AP** (small/medium/large), not just aggregate mAP.
+3. Run **≥3 seed-sequential runs** (avoid CPU contention) and report variance.
+4. Compare against baseline *and* the current dynamic neck on an
+   **accuracy / CPU-ms Pareto** (end-to-end CPU ms including decode + NMS),
+   not FLOPs alone.
+
+*(Matches the RetinaGate observation: gated-fusion gains are size-dependent;
+the all-large Isda set explains the neutral first result.)*

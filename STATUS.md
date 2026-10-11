@@ -5,8 +5,14 @@
 publish workflow; upload still pending.
 **Cross-scale exchange ablation — COMPLETE (2026-10-10):** 4-arm, 30-epoch,
 seed-23 run shows no accuracy gain over the plain neck (+10-17 ms CPU latency);
-kept opt-in, no originality claim (see [ROADMAP.md](ROADMAP.md#adaptive-cross-scale-exchange--ablation-run-closed)).
-Last updated: 2026-10-10
+kept opt-in, no originality claim — follow-up re-designs the gate spatially
+(see [ROADMAP.md](ROADMAP.md#adaptive-cross-scale-exchange--follow-up)).
+**Profiles + EMA + scale jitter — WIRED (2026-10-11):** `train()` /
+`CandyEye.train()` accept `profile` (default `a`), `ema` (default on), and
+`scale_jitter`; EMA updates per step, drives validation/best selection, and is
+saved in checkpoints; `CandyEyePredictor` rebuilds the arch from the checkpoint
+config and prefers EMA weights. 60/60 tests pass.
+Last updated: 2026-10-11
 
 ---
 

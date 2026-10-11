@@ -36,3 +36,15 @@ Real specifications for CandyEye (fp32, CPU benchmarked on this machine: AMD Ryz
 **approximate at 128.
 
 Note: decode/NMS omitted (timed raw maps). At inference time decode dominates for 4-head models — expect higher end-to-end ms.
+
+## Training features
+
+- **EMA (default on)**: decay `0.999`, warm-up `(1+u)/(10+u)` per update;
+  shadow copy used for validation, `best.pt` selection, and inference. No
+  wall-clock cost (frozen averaged copy updated once per optimizer step).
+- **Scale jitter**: profile `a` defaults to `RandomAffine((0.5, 1.5), translate=0.1)`
+  (scale + translate, no rotation).
+- **Profiles**: `profile="a"` (default, `yolo11_p2`), `"b"` (`yolo11_p2_small`),
+  `"c"` (`yolo11`) — pass to `train(...)` or `CandyEye.train(...)`.
+- Checkpoints save live `model` + `ema` weights (+ `ema_enabled`, `updates`);
+  `CandyEyePredictor` prefers `ema` when present.
