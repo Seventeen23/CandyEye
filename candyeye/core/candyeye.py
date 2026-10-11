@@ -259,7 +259,8 @@ class CandyEye(nn.Module):
               hsv: bool = True, fliplr: float = .5,
               pretrained: bool | str | Path = False, seed: int = 23,
               exist_ok: bool = False, max_batches: int | None = None,
-              threads: int = 4):
+              threads: int = 4, profile: str | None = None, ema: bool = True,
+              scale_jitter=None, **kwargs):
         """Set PyTorch mode or launch CandyEye training when `data` is set.
 
         Example: ``model.train(data="configs/default.yaml", epochs=100,
@@ -278,6 +279,7 @@ class CandyEye(nn.Module):
             mosaic=mosaic, hsv=hsv, fliplr=fliplr, pretrained=pretrained,
             seed=seed, exist_ok=exist_ok, max_batches=max_batches,
             threads=threads,
+            **kwargs,
         )
 
     def fuse(self):

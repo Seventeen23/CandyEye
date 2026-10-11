@@ -658,7 +658,7 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
                 mosaic: float = .5, hsv: bool = True, fliplr: float = .5,
                 pretrained: bool | str | Path = False, seed: int = 23,
                 exist_ok: bool = False, max_batches: int | None = None,
-                threads: int | None = None) -> dict:
+                threads: int | None = None, profile: str | None = None, ema: bool = True, scale_jitter=None, **extra_kwargs) -> dict:
     """Train an existing CandyEye detector from Python.
 
     Each epoch reports train/validation losses and aggregate validation metrics;
