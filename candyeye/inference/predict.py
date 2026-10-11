@@ -143,8 +143,10 @@ class CandyEyePredictor:
             state, saved_config = None, {}
         # Predictions must letterbox at the size the checkpoint was trained
         # with unless the caller explicitly overrides it.
+        saved_model_cfg = saved_config.get("model", {}) if isinstance(saved_config, dict) else {}
+        cfg = cfg if cfg is not None else saved_model_cfg.get("cfg")
         self.imgsz = int(imgsz if imgsz is not None
-                         else saved_config.get("model", {}).get("img_size", 128))
+                         else saved_model_cfg.get("img_size", 128))
 
         data_config = {}
         if data is not None:
