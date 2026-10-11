@@ -312,6 +312,8 @@ def run_training(config: dict, *, epochs: int | None = None,
     device = torch.device("cpu")
     model = (model or build_experiment_model(
         config, no_pretrained=no_pretrained)).to(device)
+    ema_enabled = bool(train_cfg.get("ema", True))
+    ema = EMA(model, decay=0.999) if ema_enabled else None
     model_nc = int(getattr(model, "nc", model.model[-1].nc))
 
     augment = Compose(train_cfg.get(
@@ -404,6 +406,13 @@ def run_training(config: dict, *, epochs: int | None = None,
         checkpoint = torch.load(resume, map_location="cpu", weights_only=False)
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
+        if ema is not None and "ema" in checkpoint:
+            try:
+                ema.averaged_model.load_state_dict(checkpoint["ema"])
+                if "updates" in checkpoint:
+                    ema.updates = int(checkpoint["updates"])
+            except Exception:
+                pass
         start_epoch = int(checkpoint["epoch"])
         best_loss = float(checkpoint.get("best_loss", best_loss))
         best_map50 = float(checkpoint.get("best_map50", best_map50))
@@ -469,14 +478,20 @@ def run_training(config: dict, *, epochs: int | None = None,
                     losses["loss"].backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
                     optimizer.step()
+                    if ema is not None:
+                        try:
+                            ema.update(model)
+                        except Exception:
+                            pass
                     sums[:4] += [losses[k].item() for k in ("loss", "box", "cls", "dfl")]
                     sums[4] += losses["foreground"].item()
 
                 means = sums / steps_per_epoch
                 epoch_loss = float(means[0])
                 best_loss = min(best_loss, epoch_loss)
+                eval_model = ema.averaged_model if (ema is not None) else model
                 validation = evaluate_detector(
-                    model, val_loader, num_classes=int(model_nc), class_names=class_names,
+                    eval_model, val_loader, num_classes=int(model_nc), class_names=class_names,
                     criterion=criterion, size_buckets=True,
                 )
                 val_loss = validation["val_loss"]
@@ -516,7 +531,14 @@ def run_training(config: dict, *, epochs: int | None = None,
                          "optimizer": optimizer.state_dict(), "best_loss": best_loss,
                          "best_map50": best_map50, "best_val_loss": best_val_loss,
                          "best_epoch": best_epoch,
-                         "config": config}
+                         "config": config,
+                         "ema_enabled": ema_enabled}
+                if ema is not None:
+                    try:
+                        state["ema"] = ema.averaged_model.state_dict()
+                        state["updates"] = ema.updates
+                    except Exception:
+                        pass
                 torch.save(state, output / "last.pt")
                 if improved or not (output / "best.pt").exists():
                     torch.save(state, output / "best.pt")
@@ -685,8 +707,26 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
                     f"model has nc={model_nc}, but dataset YAML declares nc={data_nc}"
                 )
             model.set_classes(data_nc)
+    # Apply profile defaults if provided
+    prof_key = None
+    if profile:
+        try:
+            prof_key = str(profile).lower()
+        except Exception:
+            prof_key = None
+    if prof_key in PROFILES:
+        pdef = PROFILES[prof_key]
+        # imgsz default from profile if user didn't override? but imgsz is param; keep as is
+        # scale_jitter default for a if not specified
+        if scale_jitter is None and prof_key == 'a':
+            scale_jitter = (0.5, 1.5)
     data_cfg.update({"batch_size": batch, "workers": workers,
                      "mosaic_probability": mosaic})
+    if workers > 0:
+        try:
+            data_cfg.update({"persistent_workers": True, "prefetch_factor": 2})
+        except Exception:
+            pass
     cfg_name = getattr(model, "yaml", None) or str(default_config_path())
     nc = int(getattr(model, "nc", getattr(model.model[-1], "nc", 20)))
     config = {
@@ -730,6 +770,16 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
         transforms.append(HSVJitter())
     if fliplr > 0:
         transforms.append(RandomHorizontalFlip(probability=fliplr))
+    # Scale jitter (no rotation)
+    try:
+        if scale_jitter is not None:
+            if isinstance(scale_jitter, (list, tuple)) and len(scale_jitter) == 2:
+                sj = (float(scale_jitter[0]), float(scale_jitter[1]))
+            else:
+                sj = scale_jitter
+            transforms.append(RandomAffine(scale=sj, translate=0.1))
+    except Exception:
+        pass
     # run_training uses the defaults for its CLI; attach per-run options here.
     config["train"]["api_transforms"] = transforms
     config["train"]["optimizer"] = optimizer_name
@@ -756,6 +806,10 @@ def train(model: str | Path | dict | None = None, *, data,
     parsed config dict, or ``None`` for the default architecture.  ``data`` is
     a dataset YAML path or a VOC-style config dict.
     """
+    # Default profile to 'a' if not explicitly provided
+    if 'profile' not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs['profile'] = 'a'
     candyeye = CandyEye(model, nc=nc, img_size=kwargs.get("imgsz", 128))
     return train_model(candyeye, data=data, **kwargs)
 

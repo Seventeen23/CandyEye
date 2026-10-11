@@ -137,7 +137,12 @@ class CandyEyePredictor:
         self.output_dir = Path(output_dir)
         if self.weights.suffix.lower() == ".pt":
             payload = torch.load(self.weights, map_location="cpu", weights_only=False)
-            state = payload.get("model", payload) if isinstance(payload, dict) else payload
+            if isinstance(payload, dict) and "ema" in payload:
+                state = payload["ema"]
+            elif isinstance(payload, dict):
+                state = payload.get("model", payload)
+            else:
+                state = payload
             saved_config = payload.get("config", {}) if isinstance(payload, dict) else {}
         else:
             state, saved_config = None, {}
