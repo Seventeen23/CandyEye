@@ -13,8 +13,11 @@ lightweight** (MobileNet: ~2.6M params, CPU-only, 128×128) · **parallel**
 simultaneously over shared conv features — no mask branch, boxes only).
 
 All three pillars are delivered by **one configurable detector family**: a
-YOLO11-CSP backbone or a MobileNetV3-Small backbone + light FPN, both feeding
-the shared anchor-free parallel `Detect` head (see Phase 9).
+YOLO11-CSP backbone or a MobileNetV3-Small backbone, both feeding the shared
+anchor-free parallel `Detect` head. The MobileNetV3-Small backbone is now
+expressed in the same YAML layer table as the CSP one (profile `d`, the default;
+`candyeye/configs/mobilenetv3_small.yaml`), with the stock YOLO11n neck copied
+verbatim — see Phase 9.
 
 ---
 
@@ -94,7 +97,7 @@ the shared anchor-free parallel `Detect` head (see Phase 9).
 |---|---|---|
 | `tiny_scratch` | none | smoke pass; 100-epoch run pending |
 | `yolo11n_finetune` | YOLO11n COCO, head reinit | smoke pass; 100-epoch run pending |
-| `mobilenetv3_small` | ImageNet backbone | random-init smoke pass; ImageNet weights + 100-epoch run pending |
+| `mobilenetv3_small` | ImageNet backbone | ImageNet load wired (208 tensors, 0 skip, bit-exact parity) + API smoke pass; 100-epoch run pending |
 
 ## Phase 6 — Evaluation
 
@@ -148,6 +151,31 @@ deferred, opt-in accuracy experiment (see Post-1.0).
 **Novelty note:** this is an engineering integration of established components
 (efficient backbone + anchor-free YOLO head + parallel branches), not a new
 architecture claim.
+
+### Delivered: YAML-native MobileNetV3-Small backbone (profile `d`)
+
+The mobile backbone no longer needs the standalone adapter — it is a
+first-class YAML architecture (`candyeye/configs/mobilenetv3_small.yaml`):
+
+- [x] `core/modules/mobilenet.py` — `MobileStem`, `MBConv` (inverted residual +
+  SE), key/bn layout bit-identical to torchvision
+- [x] Builder support — `MobileStem`/`MBConv` in `_MODULE_MAP` with an
+  explicit-channel set (`_EXPLICIT_CHANNEL_MODULES`) so torchvision channel
+  counts are used verbatim (no YOLO width multiplier)
+- [x] `core/convert_mobilenet.py` — torchvision ImageNet state_dict remap
+  (208 tensors, 0 skipped/unexpected) + backbone forward-parity check
+- [x] Trainer wiring — `PROFILES["d"]` (default), `train()` boosts the profile
+  cfg and enables ImageNet init; `initialization.type=imagenet` for the CLI path
+- [x] Head kept verbatim from `yolo11.yaml`; layer 4 duplicates torchvision
+  `features.3` (a stride-1 /8 repeat) so the head's P3/P4/P5 references land on
+  /8, /16, /32
+- [x] Tests + docs
+
+**CPU latency caveat (measured):** at 128px the mobile model is ~9× fewer FLOPs
+than profile `c` (2.6M→1.4M params) but ~2.5× *slower* eager latency (61 vs
+25 ms) — depthwise/SE blocks are memory-bound. Depthwise-friendly runtimes
+(ONNX Runtime / OpenVINO) or fusion/quantisation are the follow-up; the legacy
+monolithic `core/backbone_mobilenet.py` (light FPN) stays for A/B.
 
 ---
 

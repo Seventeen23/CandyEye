@@ -16,6 +16,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from candyeye.core.backbone_mobilenet import MobileNetV3SmallDetector
+from candyeye.core.convert_mobilenet import load_imagenet_backbone, uses_mobilenet_backbone
 from candyeye.core.convert_yolo11 import load_official_state_dict, load_weights, remap_prefix
 from candyeye.core import CandyEye
 from candyeye.data.transforms import Compose, HSVJitter, RandomAffine, RandomHorizontalFlip
@@ -37,15 +38,19 @@ def resolve_threads(threads: int | None = None) -> int:
     return max(1, int(threads))
 
 
-# Training profiles: "a" (default) = YOLO11n + P2 small-object head, "b" =
-# small-object heads only (P2/P3/P4), "c" = stock YOLO11n (fastest). A profile
-# selects the bundled architecture and sensible training defaults; everything
-# can still be overridden per call/config.
+# Training profiles: "d" (default) = MobileNetV3-Small backbone + YOLO11n head
+# (non-YOLO backbone, ImageNet-initialised), "a" = YOLO11n + P2 small-object
+# head, "b" = small-object heads only (P2/P3/P4), "c" = stock YOLO11n
+# (fastest).  A profile selects the bundled architecture and sensible training
+# defaults; everything can still be overridden per call/config.
 PROFILES: dict[str, dict] = {
     "a": {"cfg": "yolo11_p2", "default_imgsz": 320, "scale_jitter": (0.5, 1.5)},
     "b": {"cfg": "yolo11_p2_small", "default_imgsz": 320, "scale_jitter": None},
     "c": {"cfg": "yolo11", "default_imgsz": 128, "scale_jitter": None},
+    "d": {"cfg": "mobilenetv3_small", "default_imgsz": 128, "scale_jitter": None},
 }
+
+DEFAULT_PROFILE = "d"
 
 
 def resolve_profile(profile: str) -> dict:
@@ -286,6 +291,13 @@ def build_experiment_model(config: dict, no_pretrained: bool = False):
                 raise RuntimeError(f"unexpected pretrained keys: {report['unexpected'][:5]}")
             print(f"loaded {len(report['loaded'])} pretrained tensors; "
                   f"reinitialized {len(report['skipped'])} shape-mismatched tensors")
+        if init_cfg.get("type") == "imagenet":
+            if not uses_mobilenet_backbone(model):
+                raise ValueError(
+                    "initialization.type=imagenet requires a MobileNetV3 backbone")
+            report = load_imagenet_backbone(model)
+            print(f"loaded {len(report['loaded'])} ImageNet backbone tensors; "
+                  f"skipped {len(report['skipped'])}")
         return model
     if model_type == "mobilenetv3_small":
         pretrained = bool(init_cfg.get("pretrained", False)) and not no_pretrained
@@ -716,10 +728,9 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
             prof_key = None
     if prof_key in PROFILES:
         pdef = PROFILES[prof_key]
-        # imgsz default from profile if user didn't override? but imgsz is param; keep as is
-        # scale_jitter default for a if not specified
-        if scale_jitter is None and prof_key == 'a':
-            scale_jitter = (0.5, 1.5)
+        # profile-provided scale-jitter default, unless the caller set one
+        if scale_jitter is None and pdef.get("scale_jitter") is not None:
+            scale_jitter = pdef["scale_jitter"]
     data_cfg.update({"batch_size": batch, "workers": workers,
                      "mosaic_probability": mosaic})
     if workers > 0:
@@ -754,13 +765,18 @@ def train_model(model, *, data, epochs: int = 100, imgsz: int = 128,
         output = Path(project) / name
         config["name"] = name
     if pretrained:
-        weights_path = (Path(pretrained) if not isinstance(pretrained, bool)
-                        else default_weights_path())
-        if not weights_path.exists():
-            raise FileNotFoundError(f"pretrained weights not found: {weights_path}")
-        report = load_weights(model, load_official_state_dict(str(weights_path)))
-        print(f"loaded {len(report['loaded'])} matching pretrained tensors; "
-              f"skipped {len(report['skipped'])}")
+        if uses_mobilenet_backbone(model):
+            report = load_imagenet_backbone(model)
+            print(f"loaded {len(report['loaded'])} ImageNet backbone tensors; "
+                  f"skipped {len(report['skipped'])}")
+        else:
+            weights_path = (Path(pretrained) if not isinstance(pretrained, bool)
+                            else default_weights_path())
+            if not weights_path.exists():
+                raise FileNotFoundError(f"pretrained weights not found: {weights_path}")
+            report = load_weights(model, load_official_state_dict(str(weights_path)))
+            print(f"loaded {len(report['loaded'])} matching pretrained tensors; "
+                  f"skipped {len(report['skipped'])}")
     if resume_path is not None and not resume_path.exists():
         raise FileNotFoundError(f"resume checkpoint not found: {resume_path}")
 
@@ -803,14 +819,23 @@ def train(model: str | Path | dict | None = None, *, data,
     """Create a CandyEye model from an architecture config and train it.
 
     ``model`` may be a bundled config name (``"yolo11"``), a YAML path, a
-    parsed config dict, or ``None`` for the default architecture.  ``data`` is
-    a dataset YAML path or a VOC-style config dict.
+    parsed config dict, or ``None`` for the profile's architecture (profile
+    ``"d"``, the default, is the MobileNetV3-Small backbone).  ``data`` is a
+    dataset YAML path or a VOC-style config dict.
     """
-    # Default profile to 'a' if not explicitly provided
-    if 'profile' not in kwargs:
-        kwargs = dict(kwargs)
-        kwargs['profile'] = 'a'
-    candyeye = CandyEye(model, nc=nc, img_size=kwargs.get("imgsz", 128))
+    # Default profile to 'd' (MobileNetV3-Small) if not explicitly provided.
+    kwargs = dict(kwargs)
+    profile = str(kwargs.get("profile") or DEFAULT_PROFILE).lower()
+    kwargs["profile"] = profile
+    if model is None:
+        model = PROFILES.get(profile, {}).get("cfg")
+    img_size = kwargs.get("imgsz") or PROFILES.get(profile, {}).get("default_imgsz", 128)
+    kwargs.setdefault("imgsz", img_size)
+    candyeye = CandyEye(model, nc=nc, img_size=img_size)
+    # Non-YOLO backbones initialise from ImageNet by default (skip with
+    # pretrained=False); the YOLO path keeps its official-checkpoint default.
+    if uses_mobilenet_backbone(candyeye) and "pretrained" not in kwargs:
+        kwargs["pretrained"] = True
     return train_model(candyeye, data=data, **kwargs)
 
 

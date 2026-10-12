@@ -8,11 +8,16 @@ seed-23 run shows no accuracy gain over the plain neck (+10-17 ms CPU latency);
 kept opt-in, no originality claim — follow-up re-designs the gate spatially
 (see [ROADMAP.md](ROADMAP.md#adaptive-cross-scale-exchange--follow-up)).
 **Profiles + EMA + scale jitter — WIRED (2026-10-11):** `train()` /
-`CandyEye.train()` accept `profile` (default `a`), `ema` (default on), and
-`scale_jitter`; EMA updates per step, drives validation/best selection, and is
-saved in checkpoints; `CandyEyePredictor` rebuilds the arch from the checkpoint
-config and prefers EMA weights. 60/60 tests pass.
-Last updated: 2026-10-11
+`CandyEye.train()` accept `profile`, `ema` (default on), and `scale_jitter`;
+EMA updates per step, drives validation/best selection, and is saved in
+checkpoints; `CandyEyePredictor` rebuilds the arch from the checkpoint config
+and prefers EMA weights.
+**MobileNetV3-Small YAML backbone — SHIPPED (2026-10-12):** the non-YOLO
+backbone is now a first-class YAML architecture (`configs/mobilenetv3_small.yaml`)
+with a verbatim YOLO11n head; `PROFILES["d"]` is the **new default profile**.
+torchvision ImageNet weights remap 1:1 (208 tensors, 0 skipped/unexpected) and
+backbone forward parity is bit-exact. 69/69 tests pass.
+Last updated: 2026-10-12
 
 ---
 

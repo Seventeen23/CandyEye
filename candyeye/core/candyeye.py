@@ -29,6 +29,7 @@ from candyeye.core.modules.blocks import Attention, Bottleneck, C2PSA, C3k, C3k2
 from candyeye.core.modules.conv import Conv
 from candyeye.core.modules.detect import Detect
 from candyeye.core.modules.exchange import ScaleExchange
+from candyeye.core.modules.mobilenet import MBConv, MobileStem
 from candyeye.paths import resolve_config
 
 
@@ -52,6 +53,8 @@ _MODULE_MAP = {
     "Attention": Attention,
     "PSABlock": PSABlock,
     "C2PSA": C2PSA,
+    "MobileStem": MobileStem,
+    "MBConv": MBConv,
     "Concat": Concat,
     "Detect": Detect,
     "ScaleExchange": ScaleExchange,
@@ -60,6 +63,10 @@ _MODULE_MAP = {
 }
 
 _CHANNEL_MODULES = {"Conv", "C3k2", "C2PSA", "SPPF", "C3k", "Bottleneck", "Attention", "PSABlock"}
+
+# Modules whose channel args are already absolute (MobileNetV3 blocks re-use
+# the torchvision channel plan verbatim) — no YOLO width-multiplier applied.
+_EXPLICIT_CHANNEL_MODULES = {"MobileStem", "MBConv"}
 
 # depth_mult, width_mult, max_channels
 _SCALES = {"n": (0.50, 0.25, 1024)}
@@ -112,6 +119,9 @@ def parse_model(data: dict) -> nn.Sequential:
             if m == "C3k2":
                 args.insert(2, n)  # repeats slot inside the block
                 n = 1
+        elif m in _EXPLICIT_CHANNEL_MODULES:
+            c1, c2 = cur, args[0]
+            args = [c1, c2, *args[1:]]
         elif m == "nn.Upsample":
             if isinstance(f, int) and f >= 0:
                 c2 = ch[f]

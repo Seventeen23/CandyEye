@@ -1,0 +1,47 @@
+# CandyEye — MobileNetV3-Small backbone + verbatim YOLO11n head
+#
+# Backbone: the torchvision MobileNetV3-Small feature blocks (stem + 9
+# inverted-residual blocks) expressed in the YOLO yaml layer table.  The head
+# section is copied unchanged from yolo11.yaml so the FPN/Detect graph is
+# byte-for-byte the stock YOLO11n neck.
+#
+# Why MobileNetV3: a non-YOLO backbone in the same YAML format proves the
+# builder is backend-agnostic — any C3k2/CSP stack can be swapped for the
+# inverted-residual blocks below.  Channels are explicit (no width_mult), so
+# the torchvision ImageNet state_dict remaps 1:1 (see convert_mobilenet.py).
+#
+# Layer 4 duplicates the weights of layer 3 (torchvision `features.3`): /8
+# output has only two blocks in MobileNetV3-Small, so a stride-1 repeat sits
+# at index 4 so the head's P3 reference resolves to a /8 map (2x finer than
+# the /16 map at layer 6, which is 2x finer than /32 at layer 10).  Loading
+# shares the `features.3` tensors between layers 3 and 4.
+nc: 20
+scale: n
+
+backbone:
+  - [-1, 1, MobileStem, [16, 3, 2]]          # 0 /2
+  - [-1, 1, MBConv, [16, 3, 2, 16, True, "RE"]]     # 1 /4
+  - [-1, 1, MBConv, [24, 3, 2, 72, False, "RE"]]    # 2 /8
+  - [-1, 1, MBConv, [24, 3, 1, 88, False, "RE"]]    # 3 /8
+  - [-1, 1, MBConv, [24, 3, 1, 88, False, "RE"]]    # 4 /8 P3 (torchvision K3)
+  - [-1, 1, MBConv, [40, 5, 2, 96, True, "HS"]]    # 5 /16
+  - [-1, 1, MBConv, [40, 5, 1, 240, True, "HS"]]   # 6 /16 P4 (K5)
+  - [-1, 1, MBConv, [40, 5, 1, 240, True, "HS"]]   # 7 /16
+  - [-1, 1, MBConv, [48, 5, 1, 120, True, "HS"]]   # 8 /16
+  - [-1, 1, MBConv, [48, 5, 1, 144, True, "HS"]]   # 9 /16
+  - [-1, 1, MBConv, [96, 5, 2, 288, True, "HS"]]   # 10 /32 P5 (K9)
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 11
+  - [[-1, 6], 1, Concat, [1]]                     # 12 cat backbone P4
+  - [-1, 1, C3k2, [512, False]]                   # 13
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 14
+  - [[-1, 4], 1, Concat, [1]]                     # 15 cat backbone P3
+  - [-1, 1, C3k2, [256, False]]                   # 16 P3/8 (small)
+  - [-1, 1, Conv, [256, 3, 2]]                    # 17
+  - [[-1, 13], 1, Concat, [1]]                    # 18 cat head P4
+  - [-1, 1, C3k2, [512, False]]                   # 19 P4/16 (medium)
+  - [-1, 1, Conv, [512, 3, 2]]                    # 20
+  - [[-1, 10], 1, Concat, [1]]                    # 21 cat head P5
+  - [-1, 1, C3k2, [1024, True]]                   # 22 P5/32 (large)
+  - [[16, 19, 22], 1, Detect, [nc]]               # 23 box+cls, parallel

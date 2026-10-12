@@ -7,10 +7,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Profiles** — `profile="a" | "b" | "c"` selects a bundled architecture/strides
-  bundle and its augmentation defaults; `a` (P2/P3/P4/P5, `yolo11_p2`) is the
-  default. New configs `candyeye/configs/yolo11_p2.yaml` (a) and
-  `yolo11_p2_small.yaml` (b); `PROFILES` / `resolve_profile()` in
+- **MobileNetV3-Small YAML backbone (profile `d`, now the default)** — a
+  non-YOLO feature extractor expressed in the same YAML layer table as the CSP
+  backbones. New `candyeye/configs/mobilenetv3_small.yaml` (mobile backbone +
+  verbatim `yolo11.yaml` head), module types `MobileStem` / `MBConv` in
+  `core/modules/mobilenet.py`, and an explicit-channel set
+  (`_EXPLICIT_CHANNEL_MODULES`) so torchvision channel counts are used
+  verbatim (no YOLO width multiplier). `core/convert_mobilenet.py` remaps the
+  torchvision ImageNet state_dict (208 tensors, 0 skipped/unexpected) and
+  exposes a bit-exact forward-parity check. `train()` targets profile `d` by
+  default and initialises the backbone from ImageNet (skip with
+  `pretrained=False`); `initialization.type=imagenet` covers the CLI path.
+  Layer 4 duplicates torchvision `features.3` (a stride-1 /8 repeat) so the
+  head's P3/P4/P5 references land on /8, /16, /32.
+- **Profiles** — `profile="a" | "b" | "c" | "d"` selects a bundled
+  architecture/strides bundle and its augmentation defaults; `d`
+  (`mobilenetv3_small`) is the default. New configs
+  `candyeye/configs/yolo11_p2.yaml` (a), `yolo11_p2_small.yaml` (b), and
+  `mobilenetv3_small.yaml` (d); `PROFILES` / `resolve_profile()` in
   `training/trainer.py`. P2 fusion is appended after the neck so pretrained
   indices 0–22 stay unchanged (only Detect is remapped).
 - **EMA** — `EMA` (decay `0.999`, warm-up `(1+u)/(10+u)`, integer buffers
@@ -44,6 +58,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Default training profile is now `d`** (`mobilenetv3_small`). `train(...)`
+  with no `model`/`profile` builds the MobileNetV3-Small backbone and
+  initialises it from ImageNet; pass `profile="a"` (or another) to restore the
+  previous YOLO11-P2 default.
 - **Exchange neck result recorded as negative.** The controlled four-arm
   ablation (baseline / none / static / dynamic, Isda 9-class, seed 23, 30
   epochs) showed no detection-quality gain — all arms within ±0.012 mAP@0.5 of
