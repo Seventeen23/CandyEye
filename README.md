@@ -121,9 +121,9 @@ torchvision ImageNet weights into `~/.cache/torch/` (skip with
 ## Training
 
 Training is available through CandyEye's Python API. The model config defines
-the architecture (bundled names such as `"yolo11"`, `"yolo11_p2"`, or
-`"yolo11_exchange"`, a YAML path, or a parsed dict); the data YAML points to
-your dataset and split names.
+the architecture (bundled names such as `"mobilenetv3_small"`, `"yolo11"`,
+`"yolo11_p2"`, or `"yolo11_exchange"`, a YAML path, or a parsed dict); the data
+YAML points to your dataset and split names.
 
 CandyEye is designed to be used as a **library** from any directory. The
 patterns below work whether you run inside the repo (with the venv) or install
@@ -164,6 +164,35 @@ enables scale-jitter `(0.5, 1.5)` by default, and profile `d` initialises the
 backbone from torchvision ImageNet weights (skip with `pretrained=False`).
 Measured params/FLOPs/latency for each profile at 128/320/640 are in
 [MODEL_SPECS.md](MODEL_SPECS.md).
+
+### Models
+
+Every architecture ships as a bundled YAML in `candyeye/configs/` and can be
+passed by name to `CandyEye(...)` / `train(model=...)`, or as a YAML path, or as
+a parsed dict. Each profile maps to one of these (the profile additionally
+supplies image-size / augmentation / init defaults):
+
+| Config (`model=`) | Backbone | Levels (strides) | Params (nc=20) | Used by profile |
+|---|---|---|---:|---|
+| `mobilenetv3_small` | MobileNetV3-Small (torchvision ImageNet init) + stock YOLO11n neck/head | P3/P4/P5 (8/16/32) | 1.44M | `d` (default) |
+| `yolo11` | YOLO11n CSP + SPPF/C2PSA | P3/P4/P5 (8/16/32) | 2.59M | `c` |
+| `yolo11_p2` | YOLO11n CSP + P2 head fusion | P2/P3/P4/P5 (4/8/16/32) | 2.64M | `a` |
+| `yolo11_p2_small` | YOLO11n CSP, small-object heads only | P2/P3/P4 (4/8/16) | 2.44M | `b` |
+| `yolo11_exchange` | YOLO11n CSP + opt-in `ScaleExchange` cross-scale neck (`gate`: `none`/`static`/`dynamic`) | P3/P4/P5 (8/16/32) | 2.6M+ | — (ablation only) |
+
+```python
+from candyeye import CandyEye
+
+CandyEye("mobilenetv3_small")   # default profile d
+CandyEye("yolo11")              # profile c
+CandyEye("yolo11_p2")           # profile a
+CandyEye("yolo11_p2_small")     # profile b
+CandyEye("configs/yolo11_exchange.yaml", nc=9)  # path form; ablation neck
+```
+
+`configs/experiments/*.yaml` (repo checkout) are full training configs
+(`model` + `data` + `train`) for the Isda 9-class ablations; the bundled
+configs above are architecture-only.
 
 ### EMA, scale jitter, and resume
 
