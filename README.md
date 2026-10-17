@@ -105,14 +105,15 @@ pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 ```
 
 The wheel bundles the default `yolo11`, `yolo11_p2`, `yolo11_p2_small`,
-`mobilenetv3_small`, and `yolo11_exchange` architecture configs, so
+`mobilenetv3_small`, `mobilenetv3_small_p2`, `mobilenetv3_large`,
+`mobilenetv3_large_p2`, and `yolo11_exchange` architecture configs, so
 `CandyEye()` works with no checkout
 and no download. The clean `yolo11n` weights
 are **not** shipped in the wheel or sdist (they derive from Ultralytics'
 AGPL-3.0 checkpoints): a fresh install downloads the official checkpoint on the
 first `train(..., pretrained=True)` and caches a clean state_dict under
 `~/.cache/candyeye/`. In a source checkout, `candyeye/assets/yolo11n.pth` is used
-directly for offline dev/tests. The `mobilenetv3_small` backbone instead pulls
+directly for offline dev/tests. The `mobilenetv3_*` backbones instead pull
 torchvision ImageNet weights into `~/.cache/torch/` (skip with
 `pretrained=False`). Install the optional converter with
 `pip install CandyEye[weights]`, or point `$CANDYEYE_WEIGHTS` at an existing
@@ -158,10 +159,14 @@ defaults; it defaults to **`d`** (MobileNetV3-Small backbone).
 | `a` | `yolo11_p2` | P2/P3/P4/P5 (4/8/16/32) | general model; small objects included |
 | `b` | `yolo11_p2_small` | P2/P3/P4 (4/8/16) | small-object only; drops the large head |
 | `c` | `yolo11` | P3/P4/P5 (8/16/32) | fastest; stock YOLO11n neck |
+| `e` | `mobilenetv3_small_p2` | P2/P3/P4/P5 (4/8/16/32) | MobileNetV3-Small + SPPF/C2PSA + P2 |
+| `f` | `mobilenetv3_large_p2` | P2/P3/P4/P5 (4/8/16/32) | MobileNetV3-Large + SPPF/C2PSA + P2; most capacity |
+| `g` | `mobilenetv3_large` | P3/P4/P5 (8/16/32) | MobileNetV3-Large + SPPF/C2PSA, no P2 (large objects) |
 
-Profile defaults are applied only when you don't override them: profile `a`
-enables scale-jitter `(0.5, 1.5)` by default, and profile `d` initialises the
-backbone from torchvision ImageNet weights (skip with `pretrained=False`).
+Profile defaults are applied only when you don't override them: profiles `a`
+and `e`/`f` enable scale-jitter `(0.5, 1.5)` by default, and the MobileNetV3
+profiles (`d`/`e`/`f`/`g`) initialise the backbone from torchvision ImageNet
+weights (skip with `pretrained=False`).
 Measured params/FLOPs/latency for each profile at 128/320/640 are in
 [MODEL_SPECS.md](MODEL_SPECS.md).
 
@@ -173,8 +178,11 @@ a parsed dict. Each profile maps to one of these (the profile additionally
 supplies image-size / augmentation / init defaults):
 
 | Config (`model=`) | Backbone | Levels (strides) | Params (nc=20) | Used by profile |
-|---|---|---|---:|---|
+|---|---|---|---|---:|---|
 | `mobilenetv3_small` | MobileNetV3-Small (torchvision ImageNet init) + stock YOLO11n neck/head | P3/P4/P5 (8/16/32) | 1.44M | `d` (default) |
+| `mobilenetv3_small_p2` | MobileNetV3-Small + SPPF/C2PSA + P2 fusion | P2/P3/P4/P5 (4/8/16/32) | 1.58M | `e` |
+| `mobilenetv3_large` | MobileNetV3-Large (full 16 blocks) + SPPF/C2PSA | P3/P4/P5 (8/16/32) | 4.10M | `g` |
+| `mobilenetv3_large_p2` | MobileNetV3-Large + SPPF/C2PSA + P2 fusion | P2/P3/P4/P5 (4/8/16/32) | 4.14M | `f` |
 | `yolo11` | YOLO11n CSP + SPPF/C2PSA | P3/P4/P5 (8/16/32) | 2.59M | `c` |
 | `yolo11_p2` | YOLO11n CSP + P2 head fusion | P2/P3/P4/P5 (4/8/16/32) | 2.64M | `a` |
 | `yolo11_p2_small` | YOLO11n CSP, small-object heads only | P2/P3/P4 (4/8/16) | 2.44M | `b` |
@@ -183,10 +191,11 @@ supplies image-size / augmentation / init defaults):
 ```python
 from candyeye import CandyEye
 
-CandyEye("mobilenetv3_small")   # default profile d
-CandyEye("yolo11")              # profile c
-CandyEye("yolo11_p2")           # profile a
-CandyEye("yolo11_p2_small")     # profile b
+CandyEye("mobilenetv3_small")     # default profile d
+CandyEye("mobilenetv3_large_p2")  # profile f
+CandyEye("yolo11")                # profile c
+CandyEye("yolo11_p2")             # profile a
+CandyEye("yolo11_p2_small")       # profile b
 CandyEye("configs/yolo11_exchange.yaml", nc=9)  # path form; ablation neck
 ```
 
@@ -303,7 +312,7 @@ from candyeye import train
 results = train(
     model=None,              # bundled name, YAML path, or dict (None = profile cfg)
     data="dataset.yaml",
-    profile="d",             # "d" (default) | "a" | "b" | "c"
+    profile="d",             # "d" (default) | "a" | "b" | "c" | "e" | "f" | "g"
     epochs=100,
     imgsz=128,
     batch=16,
@@ -378,7 +387,10 @@ CandyEye/
 │   │   ├── yolo11.yaml         # profile c (P3/P4/P5)
 │   │   ├── yolo11_p2.yaml      # profile a (P2/P3/P4/P5)
 │   │   ├── yolo11_p2_small.yaml# profile b (P2/P3/P4)
-│   │   ├── mobilenetv3_small.yaml  # profile d (MobileNetV3-Small, default)
+│   │   ├── mobilenetv3_small.yaml      # profile d (MobileNetV3-Small, default)
+│   │   ├── mobilenetv3_small_p2.yaml   # profile e (+SPPF/C2PSA, P2)
+│   │   ├── mobilenetv3_large.yaml      # profile g (MobileNetV3-Large, no P2)
+│   │   ├── mobilenetv3_large_p2.yaml   # profile f (MobileNetV3-Large + P2)
 │   │   └── yolo11_exchange.yaml
 │   ├── assets/yolo11n.pth      # clean weights for dev/tests (not shipped in the wheel)
 │   ├── core/                   # model builder + nn.Module blocks

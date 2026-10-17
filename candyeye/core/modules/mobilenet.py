@@ -19,7 +19,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from candyeye.core.functions.layer_utils import make_divisible
+
+def _tv_make_divisible(v: float, divisor: int = 8) -> int:
+    """torchvision's ``_make_divisible`` (adds the <90% correction step).
+
+    The shared CandyEye ``make_divisible`` deliberately rounds to nearest for
+    YOLO width scaling; torchvision instead bumps the result up when rounding
+    would shrink a channel count by more than 10%.  The two differ for values
+    like ``72 * 0.25 = 18`` (torchvision -> 24, nearest -> 16), which the SE
+    squeeze widths in MobileNetV3-Large depend on.
+    """
+    new_v = max(divisor, int(v + divisor / 2) // divisor * divisor)
+    if new_v < 0.9 * v:
+        new_v += divisor
+    return new_v
 
 
 def _conv_block(c1: int, c2: int, k: int, s: int, groups: int = 1,
@@ -82,7 +95,7 @@ class MBConv(nn.Module):
             block.append(_conv_block(c1, exp, 1, 1, act=act_layer))          # expand
         block.append(_conv_block(exp, exp, k, s, groups=exp, act=act_layer))  # depthwise
         if se:
-            block.append(SE(exp, make_divisible(exp // 4, 8)))
+            block.append(SE(exp, _tv_make_divisible(exp * 0.25, 8)))
         block.append(_conv_block(exp, c2, 1, 1, act=None))                    # project
         self.block = nn.Sequential(*block)
 

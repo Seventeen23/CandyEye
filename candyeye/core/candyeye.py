@@ -176,6 +176,9 @@ class CandyEye(nn.Module):
         self.model = parse_model(data)
         self.nc = self.model[-1].nc
         self.yaml = resolved
+        # MobileNetV3 backbone family ("small"/"large"), if the config declares
+        # one; read by convert_mobilenet.load_imagenet_backbone for the remap.
+        self._mobilenet_variant = data.get("mobilenet_variant")
         self.img_size = img_size
         if img_size % 32:
             raise ValueError(f"img_size must be divisible by 32, got {img_size}")

@@ -75,9 +75,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **MobileNetV3-Large + P2 pyramid profiles (`e`/`f`/`g`)** — new bundled
+  configs extending the mobile family: `mobilenetv3_small_p2.yaml` (`e`),
+  `mobilenetv3_large_p2.yaml` (`f`), and `mobilenetv3_large.yaml` (`g`, no P2).
+  Each adds SPPF + C2PSA to the mobile backbone; `e`/`f` append a stride-4 P2
+  fusion level after the neck for small objects. Configs carry a
+  `mobilenet_variant: small|large` key; `PROFILES` and `resolve_profile()` select
+  `e`/`f`/`g`. Params: `e` 1.58M, `f` 4.14M, `g` 4.10M.
+- **`convert_mobilenet` two-variant support** — `imagenet_mobilenetv3_large_state`
+  / `imagenet_mobilenetv3_small_state`, a variant-aware feature map, and
+  `load_imagenet_backbone(model, state, variant=...)`; the Large backbone remaps
+  302 tensors (0 skipped/unexpected) with bit-exact forward parity.
 - `research/scale_exchange_paper_draft.md` — result tables, per-class AP,
   ablation reading, Discussion, and Conclusion filled from the measured run,
   with single-seed / provenance caveats retained.
+
+### Fixed
+
+- **`MBConv` SE squeeze channel count** — the squeeze/excite `make_divisible`
+  now matches torchvision's `_make_divisible` (0.9 round-down correction) instead
+  of the YOLO nearest-rounding, which under-sized the SE hidden layer for
+  `hidden=72` (18 → 24, not 16).
 
 ## [0.1.0] — 2026-10-09
 

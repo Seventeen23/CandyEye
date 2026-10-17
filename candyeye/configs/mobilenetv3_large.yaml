@@ -1,0 +1,47 @@
+# CandyEye — training profile "g": MobileNetV3-Large + SPPF/C2PSA (3 heads)
+#
+# Same full-depth MobileNetV3-Large backbone + SPPF/C2PSA as
+# mobilenetv3_large_p2.yaml, but WITHOUT the stride-4 P2 level.  This isolates
+# backbone capacity from the P2 fusion: use "f" when small objects matter and
+# "g" when they do not (e.g. large-object datasets), where the extra P2 branch
+# only costs latency.
+#
+# Three heads -> strides [8, 16, 32], channels 64/128/256.
+nc: 20
+scale: n
+mobilenet_variant: large
+
+backbone:
+  - [-1, 1, MobileStem, [16, 3, 2]]                 # 0  /2
+  - [-1, 1, MBConv, [16, 3, 1, 16, False, "RE"]]    # 1  /2
+  - [-1, 1, MBConv, [24, 3, 2, 64, False, "RE"]]    # 2  /4
+  - [-1, 1, MBConv, [24, 3, 1, 72, False, "RE"]]    # 3  /4
+  - [-1, 1, MBConv, [40, 5, 2, 72, True, "RE"]]     # 4  /8  P3
+  - [-1, 1, MBConv, [40, 5, 1, 120, True, "RE"]]    # 5  /8
+  - [-1, 1, MBConv, [40, 5, 1, 120, True, "RE"]]    # 6  /8
+  - [-1, 1, MBConv, [80, 3, 2, 240, False, "HS"]]   # 7  /16 P4
+  - [-1, 1, MBConv, [80, 3, 1, 200, False, "HS"]]   # 8  /16
+  - [-1, 1, MBConv, [80, 3, 1, 184, False, "HS"]]   # 9  /16
+  - [-1, 1, MBConv, [80, 3, 1, 184, False, "HS"]]   # 10 /16
+  - [-1, 1, MBConv, [112, 3, 1, 480, True, "HS"]]   # 11 /16
+  - [-1, 1, MBConv, [112, 3, 1, 672, True, "HS"]]   # 12 /16
+  - [-1, 1, MBConv, [160, 5, 2, 672, True, "HS"]]   # 13 /32
+  - [-1, 1, MBConv, [160, 5, 1, 960, True, "HS"]]   # 14 /32
+  - [-1, 1, MBConv, [160, 5, 1, 960, True, "HS"]]   # 15 /32
+  - [-1, 1, SPPF, [512, 5]]                         # 16
+  - [-1, 1, C2PSA, [512]]                           # 17 /32 P5
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]      # 18
+  - [[-1, 7], 1, Concat, [1]]                        # 19 cat backbone P4
+  - [-1, 1, C3k2, [512, False]]                      # 20
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]       # 21
+  - [[-1, 4], 1, Concat, [1]]                        # 22 cat backbone P3
+  - [-1, 1, C3k2, [256, False]]                      # 23 P3/8 (small)
+  - [-1, 1, Conv, [256, 3, 2]]                       # 24
+  - [[-1, 20], 1, Concat, [1]]                       # 25 cat head P4
+  - [-1, 1, C3k2, [512, False]]                      # 26 P4/16 (medium)
+  - [-1, 1, Conv, [512, 3, 2]]                       # 27
+  - [[-1, 17], 1, Concat, [1]]                       # 28 cat backbone P5
+  - [-1, 1, C3k2, [1024, True]]                      # 29 P5/32 (large)
+  - [[23, 26, 29], 1, Detect, [nc]]                  # 30 P3/P4/P5, parallel

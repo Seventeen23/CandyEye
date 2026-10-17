@@ -171,11 +171,31 @@ first-class YAML architecture (`candyeye/configs/mobilenetv3_small.yaml`):
   /8, /16, /32
 - [x] Tests + docs
 
-**CPU latency caveat (measured):** at 128px the mobile model is ~9× fewer FLOPs
-than profile `c` (2.6M→1.4M params) but ~2.5× *slower* eager latency (61 vs
-25 ms) — depthwise/SE blocks are memory-bound. Depthwise-friendly runtimes
-(ONNX Runtime / OpenVINO) or fusion/quantisation are the follow-up; the legacy
-monolithic `core/backbone_mobilenet.py` (light FPN) stays for A/B.
+**CPU latency caveat (re-measured 2026-10):** contrary to the original
+single-run figure, MobileNetV3-Small is **not** slower than profile `c` on this
+host — at 128px both land near ~25 ms (d ≈ 24.8 vs c ≈ 24.6), and at 320px
+d ≈ 61 vs c ≈ 66. The earlier "61 ms at 128 / 2.5× slower" number was a
+loaded-host artifact (61 ms is actually d's *320* latency). Depthwise/SE blocks
+remain memory-bound, so depthwise-friendly runtimes (ONNX Runtime / OpenVINO) or
+fusion/quantisation stay the follow-up; the legacy monolithic
+`core/backbone_mobilenet.py` (light FPN) stays for A/B.
+
+### Delivered: MobileNetV3-Large + P2 pyramid profiles (`e`/`f`/`g`)
+
+Adds small-object capability and more backbone capacity to the mobile family:
+
+- [x] `mobilenetv3_small_p2.yaml` (profile `e`) — Small + SPPF/C2PSA + P2,
+  strides `[4,8,16,32]`, 1.58M params
+- [x] `mobilenetv3_large_p2.yaml` (profile `f`) — full-depth (16-block)
+  MobileNetV3-Large + SPPF/C2PSA + P2, strides `[4,8,16,32]`, 4.14M params
+- [x] `mobilenetv3_large.yaml` (profile `g`) — Large + SPPF/C2PSA, 3 heads
+  `[8,16,32]`, no P2 (large-object data), 4.10M params
+- [x] `core/convert_mobilenet.py` generalised to two variants (`small`/`large`)
+  via a `mobilenet_variant` YAML key; Large remaps the full 16-block
+  `features` prefix (302 tensors, 0 skipped/unexpected, bit-exact parity)
+- [x] `MBConv` SE squeeze switched to torchvision's `_make_divisible` (the
+  0.9-correction differs from the YOLO nearest-rounding for hidden=72)
+- [x] `PROFILES` `e`/`f`/`g`; tests + `MODEL_SPECS.md` rows
 
 ---
 

@@ -17,7 +17,14 @@ backbone is now a first-class YAML architecture (`configs/mobilenetv3_small.yaml
 with a verbatim YOLO11n head; `PROFILES["d"]` is the **new default profile**.
 torchvision ImageNet weights remap 1:1 (208 tensors, 0 skipped/unexpected) and
 backbone forward parity is bit-exact. 69/69 tests pass.
-Last updated: 2026-10-12
+**MobileNetV3-Large + P2 profiles — SHIPPED (2026-10-14):** three new profiles
+for fine-grained fish and future small objects — `e` (`mobilenetv3_small_p2`),
+`f` (`mobilenetv3_large_p2`), `g` (`mobilenetv3_large`, no P2). The mobile
+backbone gained SPPF/C2PSA and a stride-4 P2 fusion level; `convert_mobilenet`
+now handles both `small` and `large` variants (Large: 302 tensors, 0
+skipped/unexpected, bit-exact parity). Fixed the `MBConv` SE squeeze to use
+torchvision's `_make_divisible` correction. 75 tests collected.
+Last updated: 2026-10-14
 
 ---
 
@@ -45,7 +52,7 @@ Detailed per-phase specs + run commands: local `SPECS.md` (git-ignored).
 | opencv / numpy / pillow | opencv-python-headless 5.0.0.93 · numpy 2.5.2 · pillow 12.3.0 |
 | extras | pyyaml 6.0.3, tqdm 4.70.1, pytest 9.1.1 |
 | Hardware | 8 CPU cores, 13 GB RAM (CPU-only training) |
-| Disk | ~9.7 GB free (disk 96% full; exchange runs need ~0.5 GB each) |
+| Disk | ~12 GB free (disk 96% full; cleaned stale runs 2026-10-14; exchange runs need ~0.5 GB each) |
 | venv | `CandyEye/venv/` |
 | Remote | https://github.com/Seventeen23/CandyEye |
 

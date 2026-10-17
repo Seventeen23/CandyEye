@@ -144,3 +144,65 @@ def test_checkpoint_to_predictor_round_trip(tmp_path):
 
     result = predictor.predict(np.zeros((128, 128, 3), dtype=np.uint8))
     assert "detections" in result
+
+
+# --- MobileNetV3-Large + P2 profiles (e/f/g) --------------------------------
+
+LARGE_CFG = "mobilenetv3_large"
+
+
+def test_large_graph_strides_and_params():
+    m = CandyEye(LARGE_CFG, nc=20, img_size=128)
+    assert m.stride.tolist() == [8.0, 16.0, 32.0]
+    assert sum(p.numel() for p in m.parameters()) == 4_101_372
+    # full-depth backbone: 16 torchvision blocks between stem and SPPF
+    assert isinstance(m.model[0], MobileStem)
+    assert all(isinstance(m.model[i], MBConv) for i in range(1, 16))
+
+
+def test_large_p2_has_four_heads():
+    m = CandyEye("mobilenetv3_large_p2", nc=20, img_size=128)
+    assert m.stride.tolist() == [4.0, 8.0, 16.0, 32.0]
+    assert sum(p.numel() for p in m.parameters()) == 4_144_544
+
+
+def test_small_p2_has_four_heads():
+    m = CandyEye("mobilenetv3_small_p2", nc=20, img_size=128)
+    assert m.stride.tolist() == [4.0, 8.0, 16.0, 32.0]
+    assert sum(p.numel() for p in m.parameters()) == 1_584_856
+
+
+def test_profiles_e_f_g_registered():
+    from candyeye.training.trainer import PROFILES
+    assert PROFILES["e"]["cfg"] == "mobilenetv3_small_p2"
+    assert PROFILES["f"]["cfg"] == "mobilenetv3_large_p2"
+    assert PROFILES["g"]["cfg"] == "mobilenetv3_large"
+
+
+def test_large_variant_and_feature_map():
+    from candyeye.core.convert_mobilenet import (
+        MOBILE_V3_LARGE_FEATURE_MAP, mobilenet_variant,
+    )
+    assert MOBILE_V3_LARGE_FEATURE_MAP == [(i, i) for i in range(16)]
+    assert mobilenet_variant(CandyEye(LARGE_CFG, nc=9, img_size=128)) == "large"
+    assert mobilenet_variant(CandyEye("mobilenetv3_small", nc=9, img_size=128)) == "small"
+
+
+@pytest.fixture(scope="module")
+def imagenet_large_state():
+    from candyeye.core.convert_mobilenet import imagenet_mobilenetv3_large_state
+    state = imagenet_mobilenetv3_large_state()
+    if state is None:
+        pytest.skip("ImageNet weights unavailable (offline)")
+    return state
+
+
+def test_large_imagenet_remap_and_parity(imagenet_large_state):
+    m = CandyEye(LARGE_CFG, nc=9, img_size=128)
+    report = load_imagenet_backbone(m, imagenet_large_state)
+    assert report["unexpected"] == []
+    assert report["skipped"] == []
+    assert len(report["loaded"]) == 302
+    diffs = backbone_parity(m, imagenet_large_state, img=128, atol=1e-5)
+    assert set(diffs) == set(range(16))
+    assert all(v <= 1e-5 for v in diffs.values()), diffs

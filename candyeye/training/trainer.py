@@ -41,13 +41,18 @@ def resolve_threads(threads: int | None = None) -> int:
 # Training profiles: "d" (default) = MobileNetV3-Small backbone + YOLO11n head
 # (non-YOLO backbone, ImageNet-initialised), "a" = YOLO11n + P2 small-object
 # head, "b" = small-object heads only (P2/P3/P4), "c" = stock YOLO11n
-# (fastest).  A profile selects the bundled architecture and sensible training
+# (fastest), "e" = MobileNetV3-Small + SPPF/C2PSA + P2, "f" =
+# MobileNetV3-Large + SPPF/C2PSA + P2, "g" = MobileNetV3-Large + SPPF/C2PSA
+# (no P2).  A profile selects the bundled architecture and sensible training
 # defaults; everything can still be overridden per call/config.
 PROFILES: dict[str, dict] = {
     "a": {"cfg": "yolo11_p2", "default_imgsz": 320, "scale_jitter": (0.5, 1.5)},
     "b": {"cfg": "yolo11_p2_small", "default_imgsz": 320, "scale_jitter": None},
     "c": {"cfg": "yolo11", "default_imgsz": 128, "scale_jitter": None},
     "d": {"cfg": "mobilenetv3_small", "default_imgsz": 128, "scale_jitter": None},
+    "e": {"cfg": "mobilenetv3_small_p2", "default_imgsz": 256, "scale_jitter": (0.5, 1.5)},
+    "f": {"cfg": "mobilenetv3_large_p2", "default_imgsz": 256, "scale_jitter": (0.5, 1.5)},
+    "g": {"cfg": "mobilenetv3_large", "default_imgsz": 256, "scale_jitter": None},
 }
 
 DEFAULT_PROFILE = "d"
